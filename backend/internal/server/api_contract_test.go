@@ -338,6 +338,8 @@ func TestAPIContracts(t *testing.T) {
 						"require_oauth_only": false,
 						"require_privacy_set": false,
 						"rpm_limit": 0,
+						"kiro_cache_emulation_enabled": false,
+						"kiro_cache_emulation_ratio": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}
@@ -773,6 +775,8 @@ func TestAPIContracts(t *testing.T) {
 					"backend_mode_enabled": false,
 					"enable_cch_signing": false,
 					"enable_anthropic_cache_ttl_1h_injection": false,
+					"rewrite_message_cache_control": false,
+					"antigravity_user_agent_version": "",
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
 					"web_search_emulation_enabled": false,
@@ -988,6 +992,8 @@ func TestAPIContracts(t *testing.T) {
 					"enable_metadata_passthrough": false,
 					"enable_cch_signing": false,
 					"enable_anthropic_cache_ttl_1h_injection": false,
+					"rewrite_message_cache_control": false,
+					"antigravity_user_agent_version": "",
 					"web_search_emulation_enabled": false,
 					"payment_visible_method_alipay_source": "",
 					"payment_visible_method_wxpay_source": "",

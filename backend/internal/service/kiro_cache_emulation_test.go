@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropictokenizer"
 )
 
 func TestKiroCacheEmulationGroupDefaultsAndNonKiro(t *testing.T) {
@@ -159,17 +161,17 @@ func TestKiroInputTokenEstimateIgnoresClientMetadata(t *testing.T) {
 }
 
 func TestKiroTokenCountersMatchReferenceRules(t *testing.T) {
-	if got := countKiroTextTokens("abc def"); got != 2 {
-		t.Fatalf("english tokens = %d, want 2", got)
+	if got := anthropictokenizer.CountTokens("abc def"); got != 1 {
+		t.Fatalf("english tokens = %d, want 1", got)
 	}
-	if got := countKiroTextTokens("你好世界"); got != 3 {
-		t.Fatalf("cjk tokens = %d, want 3", got)
+	if got := anthropictokenizer.CountTokens("你好世界"); got != 1 {
+		t.Fatalf("cjk tokens = %d, want 1", got)
 	}
-	if got := countKiroToolDefinitionTokens(map[string]any{"name": "tool"}); got != 150 {
-		t.Fatalf("tool tokens = %d, want 150", got)
+	if kiroTokensPerTool != 150 {
+		t.Fatalf("tool tokens = %d, want 150", kiroTokensPerTool)
 	}
-	if got := countKiroMessageContentTokens(map[string]any{"thinking": "abc def"}); got != 2 {
-		t.Fatalf("thinking tokens = %d, want 2", got)
+	if got := countKiroMessageContentTokens(map[string]any{"thinking": "abc def"}); got != 1 {
+		t.Fatalf("thinking tokens = %d, want 1", got)
 	}
 	if got := countKiroMessageContentTokens(map[string]any{"input": map[string]any{"path": "/tmp/a.txt"}}); got <= 0 {
 		t.Fatalf("tool input tokens should be positive, got %d", got)

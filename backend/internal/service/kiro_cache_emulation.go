@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropictokenizer"
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
@@ -190,7 +191,7 @@ func flattenKiroCacheBlocks(payload map[string]any) []kiroPendingBlock {
 			value := stripKiroCacheControl(tool)
 			blocks = append(blocks, kiroPendingBlock{
 				value:  map[string]any{"kind": "tool", "tool_index": toolIndex, "tool": value},
-				tokens: countKiroToolDefinitionTokens(tool), breakpointTTL: extractKiroCacheTTL(tool),
+				tokens: kiroTokensPerTool, breakpointTTL: extractKiroCacheTTL(tool),
 			})
 		}
 	}
@@ -469,7 +470,7 @@ func countKiroInputTokensFromPayload(payload map[string]any) int {
 	if len(messages) > 0 {
 		canonical, err := canonicalJSON(messages)
 		if err == nil {
-			tokens += countKiroTextTokens(string(canonical))
+			tokens += anthropictokenizer.CountTokens(string(canonical))
 		}
 		tokens += len(messages) * kiroTokensPerMessage
 	}
@@ -479,17 +480,13 @@ func countKiroInputTokensFromPayload(payload map[string]any) int {
 	return max(tokens, 1)
 }
 
-func countKiroToolDefinitionTokens(any) int {
-	return kiroTokensPerTool
-}
-
 func countKiroSystemBlockTokens(value any) int {
 	switch typed := value.(type) {
 	case string:
-		return countKiroTextTokens(typed)
+		return anthropictokenizer.CountTokens(typed)
 	case map[string]any:
 		if text, ok := typed["text"].(string); ok {
-			return countKiroTextTokens(text)
+			return anthropictokenizer.CountTokens(text)
 		}
 		return 0
 	default:
@@ -502,7 +499,7 @@ func countKiroMessageContentTokens(value any) int {
 	case nil:
 		return 0
 	case string:
-		return countKiroTextTokens(typed)
+		return anthropictokenizer.CountTokens(typed)
 	case []any:
 		total := 0
 		for _, item := range typed {
@@ -511,10 +508,10 @@ func countKiroMessageContentTokens(value any) int {
 		return total
 	case map[string]any:
 		if text, ok := typed["text"].(string); ok {
-			return countKiroTextTokens(text)
+			return anthropictokenizer.CountTokens(text)
 		}
 		if thinking, ok := typed["thinking"].(string); ok {
-			return countKiroTextTokens(thinking)
+			return anthropictokenizer.CountTokens(thinking)
 		}
 		if input, ok := typed["input"]; ok {
 			return countKiroSerializedValueTokens(input)
@@ -533,40 +530,7 @@ func countKiroSerializedValueTokens(value any) int {
 	if err != nil {
 		return 0
 	}
-	return countKiroTextTokens(string(canonical))
-}
-
-func countKiroTextTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-	cjkCount := 0
-	otherCount := 0
-	for _, r := range text {
-		if isKiroWhitespace(r) {
-			continue
-		}
-		if isKiroCJK(r) {
-			cjkCount++
-		} else {
-			otherCount++
-		}
-	}
-	return int(math.Round(float64(cjkCount)/1.5 + float64(otherCount)/3.5))
-}
-
-func isKiroWhitespace(r rune) bool {
-	return r == ' ' || r == '\n' || r == '\r' || r == '\t' || r == '\f' || r == '\v'
-}
-
-func isKiroCJK(r rune) bool {
-	return (r >= '\u4E00' && r <= '\u9FFF') ||
-		(r >= '\u3400' && r <= '\u4DBF') ||
-		(r >= '\u3040' && r <= '\u309F') ||
-		(r >= '\u30A0' && r <= '\u30FF') ||
-		(r >= '\uAC00' && r <= '\uD7AF') ||
-		(r >= '\u1100' && r <= '\u11FF') ||
-		(r >= '\u3130' && r <= '\u318F')
+	return anthropictokenizer.CountTokens(string(canonical))
 }
 
 func canonicalJSON(v any) ([]byte, error) {
