@@ -259,14 +259,6 @@ func normalizeModelAlias(model string) string {
 	}
 }
 
-func BuildKiroPayload(claudeBody []byte, modelID, profileArn, origin string, headers http.Header) ([]byte, error) {
-	result, err := BuildKiroPayloadWithContext(claudeBody, modelID, profileArn, origin, headers)
-	if err != nil {
-		return nil, err
-	}
-	return result.Payload, nil
-}
-
 func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin string, headers http.Header) (*KiroBuildResult, error) {
 	const kiroMaxOutputTokens = 32000
 	requestCtx := KiroRequestContext{ToolNameMap: map[string]string{}}
@@ -364,10 +356,6 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	return &KiroBuildResult{Payload: payloadBytes, Context: requestCtx}, nil
 }
 
-func ParseNonStreamingEventStream(body io.Reader, model string) (*ParseResult, error) {
-	return ParseNonStreamingEventStreamWithContext(body, model, KiroRequestContext{})
-}
-
 func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, requestCtx KiroRequestContext) (*ParseResult, error) {
 	content, toolUses, usage, stopReason, err := parseEventStream(body)
 	if err != nil {
@@ -381,10 +369,6 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 		Usage:        usage,
 		StopReason:   stopReason,
 	}, nil
-}
-
-func StreamEventStreamAsAnthropic(ctx context.Context, body io.Reader, w io.Writer, model string, inputTokens int) (*StreamResult, error) {
-	return StreamEventStreamAsAnthropicWithContext(ctx, body, w, model, inputTokens, KiroRequestContext{})
 }
 
 func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader, w io.Writer, model string, inputTokens int, requestCtx KiroRequestContext) (*StreamResult, error) {
@@ -404,7 +388,6 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	streamingToolStopped := make(map[string]bool)
 	currentStreamingToolID := ""
 	pendingAssistantText := ""
-	seenAssistantText := ""
 	lastContentFragment := ""
 	pendingLeadingWhitespace := ""
 	stopReason := ""
@@ -865,16 +848,14 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			if evt.Content == "" {
 				return nil
 			}
-			deltaText, newSeen := computeKiroTextDelta(seenAssistantText, evt.Content)
-			seenAssistantText = newSeen
 			lastContentFragment = evt.Content
-			if evt.IsDuplicateContent || deltaText == "" {
+			if evt.IsDuplicateContent {
 				return nil
 			}
 			if requestCtx.ThinkingEnabled {
-				return processThinkingTaggedText(deltaText)
+				return processThinkingTaggedText(evt.Content)
 			}
-			pendingAssistantText += deltaText
+			pendingAssistantText += evt.Content
 			return flushPendingAssistantText()
 		case kiroSemanticReasoning:
 			if evt.Reasoning == "" || !requestCtx.ThinkingEnabled {
@@ -1702,7 +1683,7 @@ func buildAssistantMessageStruct(msg gjson.Result, requestCtx *KiroRequestContex
 		for _, part := range content.Array() {
 			switch part.Get("type").String() {
 			case "text":
-				_, _ = contentBuilder.WriteString(part.Get("text").String())
+				appendAssistantTextPart(part.Get("text").String(), &contentBuilder, &thinkingBuilder)
 			case "thinking":
 				text := part.Get("thinking").String()
 				if text == "" {
@@ -1729,7 +1710,7 @@ func buildAssistantMessageStruct(msg gjson.Result, requestCtx *KiroRequestContex
 			}
 		}
 	} else {
-		_, _ = contentBuilder.WriteString(content.String())
+		appendAssistantTextPart(content.String(), &contentBuilder, &thinkingBuilder)
 	}
 
 	finalContent := contentBuilder.String()
@@ -1746,6 +1727,40 @@ func buildAssistantMessageStruct(msg gjson.Result, requestCtx *KiroRequestContex
 	return KiroAssistantResponseMessage{
 		Content:  finalContent,
 		ToolUses: toolUses,
+	}
+}
+
+func appendAssistantTextPart(text string, contentBuilder, thinkingBuilder *strings.Builder) {
+	if text == "" {
+		return
+	}
+	if findRealThinkingStartTag(text, 0) == -1 {
+		_, _ = contentBuilder.WriteString(text)
+		return
+	}
+	pos := 0
+	for pos < len(text) {
+		start := findRealThinkingStartTag(text, pos)
+		if start == -1 {
+			_, _ = contentBuilder.WriteString(text[pos:])
+			return
+		}
+		if start > pos {
+			_, _ = contentBuilder.WriteString(text[pos:start])
+		}
+		end := findRealThinkingEndTag(text, start+len(thinkingStartTag))
+		if end == -1 {
+			_, _ = contentBuilder.WriteString(text[start:])
+			return
+		}
+		thinking := strings.TrimPrefix(text[start+len(thinkingStartTag):end], "\n")
+		if thinking != "" {
+			_, _ = thinkingBuilder.WriteString(thinking)
+		}
+		pos = end + len(thinkingEndTag)
+		if strings.HasPrefix(text[pos:], "\n\n") {
+			pos += len("\n\n")
+		}
 	}
 }
 
@@ -2141,6 +2156,7 @@ func findRealThinkingTag(content, tag string, from int, allowEndBoundary bool) i
 	if from < 0 {
 		from = 0
 	}
+	isStartTag := tag == thinkingStartTag
 	searchFrom := from
 	for searchFrom < len(content) {
 		rel := strings.Index(content[searchFrom:], tag)
@@ -2149,7 +2165,7 @@ func findRealThinkingTag(content, tag string, from int, allowEndBoundary bool) i
 		}
 		pos := searchFrom + rel
 		after := pos + len(tag)
-		if !isThinkingTagQuoted(content, pos, after) &&
+		if !isThinkingTagQuoted(content, pos, after, isStartTag) &&
 			!isInsideMarkdownFence(content, pos) &&
 			!isLineBlockQuote(content, pos) &&
 			(!allowEndBoundary || after <= len(content)) {
@@ -2160,11 +2176,11 @@ func findRealThinkingTag(content, tag string, from int, allowEndBoundary bool) i
 	return -1
 }
 
-func isThinkingTagQuoted(content string, start, after int) bool {
-	if start > 0 && isThinkingQuoteChar(content[start-1]) {
+func isThinkingTagQuoted(content string, start, after int, isStartTag bool) bool {
+	if isStartTag && start > 0 && isThinkingQuoteChar(content[start-1]) {
 		return true
 	}
-	return after < len(content) && isThinkingQuoteChar(content[after])
+	return !isStartTag && after < len(content) && isThinkingQuoteChar(content[after])
 }
 
 func isThinkingQuoteChar(ch byte) bool {
@@ -2670,20 +2686,6 @@ func deduplicateToolUses(toolUses []KiroToolUse) []KiroToolUse {
 		out = append(out, tool)
 	}
 	return out
-}
-
-func computeKiroTextDelta(seen, incoming string) (delta, newSeen string) {
-	incoming = strings.TrimSuffix(incoming, "\u0000")
-	if incoming == "" {
-		return "", seen
-	}
-	if strings.HasPrefix(incoming, seen) {
-		return strings.TrimPrefix(incoming, seen), incoming
-	}
-	if strings.HasPrefix(seen, incoming) {
-		return "", seen
-	}
-	return incoming, seen + incoming
 }
 
 func toolUseContentKey(tool KiroToolUse) string {

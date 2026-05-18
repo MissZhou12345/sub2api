@@ -50,7 +50,7 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 
 func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, mappedModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
 	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropic(ctx, body, collector, mappedModel, inputTokens)
+	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, mappedModel, inputTokens, kiropkg.KiroRequestContext{})
 	if err != nil {
 		return nil, nil, err
 	}
