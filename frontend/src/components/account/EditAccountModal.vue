@@ -1863,10 +1863,12 @@
             {{ formatDateTime(new Date(String(account.extra.openai_compact_checked_at))) }}
           </span>
         </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.openai.compactModelMapping') }}</label>
-          <p class="input-hint">{{ t('admin.accounts.openai.compactModelMappingDesc') }}</p>
-          <div v-if="openAICompactModelMappings.length > 0" class="mb-3 space-y-2">
+        <div class="space-y-3 border-y border-gray-200 py-5 dark:border-dark-600">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.openai.compactModelMapping') }}</label>
+            <p class="input-hint">{{ t('admin.accounts.openai.compactModelMappingDesc') }}</p>
+          </div>
+          <div v-if="openAICompactModelMappings.length > 0" class="space-y-2">
             <div
               v-for="(mapping, index) in openAICompactModelMappings"
               :key="getOpenAICompactModelMappingKey(mapping)"
@@ -2309,9 +2311,11 @@
           <label class="input-label">{{ t('common.status') }}</label>
           <Select v-model="form.status" :options="statusOptions" />
         </div>
+      </div>
 
+      <div v-if="account?.platform === 'antigravity'" class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600">
         <!-- Mixed Scheduling (only for antigravity accounts, read-only in edit mode) -->
-        <div v-if="account?.platform === 'antigravity'" class="flex items-center gap-2">
+        <div class="flex items-center gap-2">
           <label class="flex cursor-not-allowed items-center gap-2 opacity-60">
             <input
               type="checkbox"
@@ -2340,7 +2344,7 @@
             </div>
           </div>
         </div>
-        <div v-if="account?.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
+        <div class="flex items-center gap-2">
           <label class="flex cursor-pointer items-center gap-2">
             <input
               type="checkbox"
@@ -2370,14 +2374,18 @@
       </div>
 
       <!-- Group Selection - 仅标准模式显示 -->
-      <GroupSelector
+      <div
         v-if="!authStore.isSimpleMode"
-        v-model="form.group_ids"
-        :groups="groups"
-        :platform="account?.platform"
-        :mixed-scheduling="mixedScheduling"
-        data-tour="account-form-groups"
-      />
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <GroupSelector
+          v-model="form.group_ids"
+          :groups="groups"
+          :platform="account?.platform"
+          :mixed-scheduling="mixedScheduling"
+          data-tour="account-form-groups"
+        />
+      </div>
 
     </form>
 
