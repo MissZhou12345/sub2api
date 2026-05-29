@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,6 +47,9 @@ const (
 )
 
 var (
+	// ErrEmptyKiroStream indicates Kiro returned a successful stream with no client-visible output.
+	ErrEmptyKiroStream = errors.New("empty kiro stream")
+
 	trailingCommaPattern = regexp.MustCompile(`,\s*([}\]])`)
 	requiredToolFields   = map[string][][]string{
 		"write":              {{"file_path", "path"}, {"content"}},
@@ -72,9 +76,12 @@ type Usage struct {
 }
 
 type StreamResult struct {
-	Usage         Usage
-	StopReason    string
-	FirstDeltaDur *time.Duration
+	Usage              Usage
+	StopReason         string
+	FirstDeltaDur      *time.Duration
+	TextDeltaCount     int
+	ThinkingDeltaCount int
+	ToolUseCount       int
 }
 
 type ParseResult struct {
@@ -397,6 +404,9 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	inThinkingBlock := false
 	stripThinkingLeadingNewline := false
 	sawNonThinkingBlock := false
+	textDeltaCount := 0
+	thinkingDeltaCount := 0
+	toolUseCount := 0
 	var outputTextBuf strings.Builder
 
 	writeEvent := func(event string, data any) error {
@@ -503,6 +513,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			return nil
 		}
 		streamingToolStarted[toolUseID] = true
+		toolUseCount++
 		return writeEvent("content_block_start", map[string]any{
 			"type":  "content_block_start",
 			"index": blockIndex,
@@ -605,6 +616,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			}
 		}
 		_, _ = outputTextBuf.WriteString(text)
+		textDeltaCount++
 		return writeEvent("content_block_delta", map[string]any{
 			"type":  "content_block_delta",
 			"index": contentBlockIndex,
@@ -632,6 +644,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			return err
 		}
 		contentBlockIndex++
+		toolUseCount++
 		if err := writeEvent("content_block_start", map[string]any{
 			"type":  "content_block_start",
 			"index": contentBlockIndex,
@@ -715,6 +728,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		}
 		if text != "" {
 			_, _ = outputTextBuf.WriteString(text)
+			thinkingDeltaCount++
 		}
 		return writeEvent("content_block_delta", map[string]any{
 			"type":  "content_block_delta",
@@ -968,6 +982,13 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			stopReason = "end_turn"
 		}
 	}
+	if textDeltaCount == 0 &&
+		thinkingDeltaCount == 0 &&
+		toolUseCount == 0 &&
+		usage.OutputTokens == 0 &&
+		firstDelta == nil {
+		return nil, ErrEmptyKiroStream
+	}
 	if err := ensureMessageStart(); err != nil {
 		return nil, err
 	}
@@ -993,9 +1014,12 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	}
 
 	return &StreamResult{
-		Usage:         usage,
-		StopReason:    stopReason,
-		FirstDeltaDur: firstDelta,
+		Usage:              usage,
+		StopReason:         stopReason,
+		FirstDeltaDur:      firstDelta,
+		TextDeltaCount:     textDeltaCount,
+		ThinkingDeltaCount: thinkingDeltaCount,
+		ToolUseCount:       toolUseCount,
 	}, nil
 }
 
@@ -1016,6 +1040,7 @@ func extractSystemPrompt(claudeBody []byte) string {
 }
 
 func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirective {
+	model := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "model").String()))
 	if override := thinkingDirectiveFromModel(gjson.GetBytes(body, "model").String()); override != nil {
 		return override
 	}
@@ -1031,6 +1056,17 @@ func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirectiv
 		}
 		return &thinkingDirective{Mode: "adaptive", BudgetTokens: budget, Effort: effort}
 	case "enabled":
+		if isKiroAdaptiveThinkingModel(model) {
+			effort := strings.TrimSpace(gjson.GetBytes(body, "output_config.effort").String())
+			if effort == "" {
+				effort = "high"
+			}
+			budget := int(gjson.GetBytes(body, "thinking.budget_tokens").Int())
+			if budget <= 0 {
+				budget = 20000
+			}
+			return &thinkingDirective{Mode: "adaptive", BudgetTokens: budget, Effort: effort}
+		}
 		budget := int(gjson.GetBytes(body, "thinking.budget_tokens").Int())
 		if budget <= 0 {
 			budget = 16000
@@ -1043,9 +1079,11 @@ func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirectiv
 		}
 	}
 	if effort := gjson.GetBytes(body, "reasoning_effort").String(); effort != "" && effort != "none" {
+		if isKiroAdaptiveThinkingModel(model) {
+			return &thinkingDirective{Mode: "adaptive", BudgetTokens: 20000, Effort: effort}
+		}
 		return &thinkingDirective{Mode: "enabled", BudgetTokens: 16000}
 	}
-	model := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "model").String()))
 	if strings.Contains(model, "-reason") {
 		return &thinkingDirective{Mode: "enabled", BudgetTokens: 16000}
 	}
@@ -1059,7 +1097,9 @@ func thinkingDirectiveFromModel(model string) *thinkingDirective {
 	}
 
 	switch normalizeModelAlias(model) {
-	case "claude-opus-4-6", "claude-opus-4.6":
+	case "claude-opus-4-6", "claude-opus-4.6",
+		"claude-opus-4-7", "claude-opus-4.7",
+		"claude-opus-4-8", "claude-opus-4.8":
 		return &thinkingDirective{
 			Mode:         "adaptive",
 			BudgetTokens: 20000,
@@ -1070,6 +1110,17 @@ func thinkingDirectiveFromModel(model string) *thinkingDirective {
 			Mode:         "enabled",
 			BudgetTokens: 20000,
 		}
+	}
+}
+
+func isKiroAdaptiveThinkingModel(model string) bool {
+	switch normalizeModelAlias(model) {
+	case "claude-opus-4-6", "claude-opus-4.6",
+		"claude-opus-4-7", "claude-opus-4.7",
+		"claude-opus-4-8", "claude-opus-4.8":
+		return true
+	default:
+		return false
 	}
 }
 
