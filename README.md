@@ -49,7 +49,7 @@ Additional Kiro-focused features in this fork:
 
 <p align="center">
   <img src="assets/screenshots/kiro-add-account.png" alt="Add Kiro account" width="58%">
-  <img src="assets/screenshots/kiro-cache-emulation.png" alt="Kiro cache emulation group settings" width="35%">
+  <img src="https://github.com/user-attachments/assets/bbf5eb3b-aa72-4494-b9a3-0fc50e03f96c" alt="Kiro cache emulation group settings" width="35%">
 </p>
 
 <p align="center">
