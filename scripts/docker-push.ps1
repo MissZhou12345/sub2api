@@ -124,19 +124,26 @@ docker buildx build `
 
 
 $buildExit = $LASTEXITCODE
-Write-StepLog '<<< STEP: docker buildx build --push done'
+Write-StepLog "<<< STEP: docker buildx build --push done (exit=$buildExit)"
 Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build/push failed. Re-run to login again if unauthorized.'
 
 Write-StepLog '>>> STEP: docker builder prune (clean build cache)'
 docker builder prune -f
 Write-StepLog '<<< STEP: build cache cleaned'
 
-Write-StepLog '>>> STEP: remove local images'
-foreach ($tag in @($RemoteTag, $LocalTag)) {
-    $out = docker rmi $tag 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[INFO] Removed local image: $tag"
+Write-StepLog '>>> STEP: remove all local sub2api images'
+$localImages = docker images --format '{{.Repository}}:{{.Tag}}' | Where-Object { $_ -match 'sub2api' }
+if ($localImages) {
+    foreach ($img in $localImages) {
+        docker rmi $img 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[INFO] Removed: $img"
+        } else {
+            Write-Host "[WARN] Could not remove: $img (in use?)"
+        }
     }
+} else {
+    Write-Host '[INFO] No local sub2api images found.'
 }
 Write-StepLog '<<< STEP: local images removed'
 

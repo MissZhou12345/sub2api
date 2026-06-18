@@ -35,8 +35,8 @@ fi
 echo "[INFO] BUILD_VERSION=${BUILD_VERSION}"
 echo "[INFO] Running: ${DC[*]} ..."
 
-# 记录当前镜像 ID，用于部署后清理
-OLD_IMAGES=$("${DC[@]}" images -q 2>/dev/null || true)
+# 记录当前 sub2api 镜像 ID，用于部署后清理
+OLD_IMAGES=$("${DC[@]}" images -q sub2api 2>/dev/null || true)
 
 "${DC[@]}" pull
 "${DC[@]}" down
