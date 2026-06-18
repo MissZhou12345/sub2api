@@ -53,42 +53,24 @@
       <template v-else>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label class="input-label" for="email-template-event">
+            <label class="input-label">
               {{ t("admin.settings.emailTemplates.event") }}
             </label>
-            <select
-              id="email-template-event"
+            <Select
               v-model="selectedEvent"
-              class="input"
+              :options="eventSelectOptions"
               :disabled="loadingTemplate || eventOptions.length === 0"
-            >
-              <option
-                v-for="option in eventOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ formatEventOptionLabel(option) }}
-              </option>
-            </select>
+            />
           </div>
           <div>
-            <label class="input-label" for="email-template-locale">
+            <label class="input-label">
               {{ t("admin.settings.emailTemplates.locale") }}
             </label>
-            <select
-              id="email-template-locale"
+            <Select
               v-model="selectedLocale"
-              class="input"
+              :options="localeSelectOptions"
               :disabled="loadingTemplate || localeOptions.length === 0"
-            >
-              <option
-                v-for="localeOption in localeOptions"
-                :key="localeOption"
-                :value="localeOption"
-              >
-                {{ formatLocale(localeOption) }}
-              </option>
-            </select>
+            />
           </div>
         </div>
 
@@ -239,6 +221,7 @@ import type {
 } from "@/api/admin/settings";
 import { useAppStore } from "@/stores";
 import { extractApiErrorMessage } from "@/utils/apiError";
+import Select from "@/components/common/Select.vue";
 
 const { t, locale } = useI18n();
 const appStore = useAppStore();
@@ -543,6 +526,20 @@ function formatLocale(locale: string): string {
   }
   return locale;
 }
+
+// Select 选项：label 预先格式化（Select 无 option label slot）
+const eventSelectOptions = computed(() =>
+  eventOptions.value.map((option) => ({
+    value: option.value,
+    label: formatEventOptionLabel(option),
+  })),
+);
+const localeSelectOptions = computed(() =>
+  localeOptions.value.map((localeOption) => ({
+    value: localeOption,
+    label: formatLocale(localeOption),
+  })),
+);
 
 function selectInitialLocale(locales: string[]): string {
   const currentLocale = locale.value.toLowerCase();

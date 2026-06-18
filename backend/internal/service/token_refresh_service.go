@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
 // tokenRefreshTempUnschedDuration token 刷新重试耗尽后临时不可调度的持续时间
@@ -45,6 +46,7 @@ func NewTokenRefreshService(
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
 	antigravityOAuthService *AntigravityOAuthService,
+	kiroOAuthService *KiroOAuthService,
 	cacheInvalidator TokenCacheInvalidator,
 	schedulerCache SchedulerCache,
 	cfg *config.Config,
@@ -65,6 +67,7 @@ func NewTokenRefreshService(
 	claudeRefresher := NewClaudeTokenRefresher(oauthService)
 	geminiRefresher := NewGeminiTokenRefresher(geminiOAuthService)
 	agRefresher := NewAntigravityTokenRefresher(antigravityOAuthService)
+	kiroRefresher := NewKiroTokenRefresher(kiroOAuthService)
 
 	// 注册平台特定的刷新器（TokenRefresher 接口）
 	s.refreshers = []TokenRefresher{
@@ -72,6 +75,7 @@ func NewTokenRefreshService(
 		openAIRefresher,
 		geminiRefresher,
 		agRefresher,
+		kiroRefresher,
 	}
 
 	// 注册对应的 OAuthRefreshExecutor（带 CacheKey 方法）
@@ -80,6 +84,7 @@ func NewTokenRefreshService(
 		openAIRefresher,
 		geminiRefresher,
 		agRefresher,
+		kiroRefresher,
 	}
 
 	return s
@@ -255,10 +260,9 @@ func (s *TokenRefreshService) processRefresh() {
 	}
 }
 
-// listActiveAccounts 获取所有active状态的账号
-// 使用ListActive确保刷新所有活跃账号的token（包括临时禁用的）
+// listActiveAccounts 获取后台 OAuth token 刷新候选账号。
 func (s *TokenRefreshService) listActiveAccounts(ctx context.Context) ([]Account, error) {
-	return s.accountRepo.ListActive(ctx)
+	return s.accountRepo.ListOAuthRefreshCandidates(ctx)
 }
 
 // refreshWithRetry 带重试的刷新
@@ -310,9 +314,6 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 					"error", setErr,
 				)
 			}
-			// 刷新失败但 access_token 可能仍有效，尝试设置隐私
-			s.ensureOpenAIPrivacy(ctx, account)
-			s.ensureAntigravityPrivacy(ctx, account)
 			return err
 		}
 
@@ -339,10 +340,6 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 		"max_retries", s.cfg.MaxRetries,
 		"error", lastErr,
 	)
-
-	// 刷新失败但 access_token 可能仍有效，尝试设置隐私
-	s.ensureOpenAIPrivacy(ctx, account)
-	s.ensureAntigravityPrivacy(ctx, account)
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
@@ -438,14 +435,20 @@ func isNonRetryableRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var kiroInvalidGrant *kiropkg.RefreshTokenInvalidError
+	if errors.As(err, &kiroInvalidGrant) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	nonRetryable := []string{
-		"invalid_grant",        // refresh_token 已失效
-		"refresh_token_reused", // OpenAI refresh_token 已被使用，必须重新授权
-		"invalid_client",       // 客户端配置错误
-		"unauthorized_client",  // 客户端未授权
-		"access_denied",        // 访问被拒绝
-		"missing_project_id",   // 缺少 project_id
+		"invalid_grant",          // refresh_token 已失效
+		"invalid_refresh_token",  // refresh_token 无效, team 账号工作区被删除会出现
+		"app_session_terminated", // refresh_token team 账号工作区被删除
+		"refresh_token_reused",   // OpenAI refresh_token 已被使用，必须重新授权
+		"invalid_client",         // 客户端配置错误
+		"unauthorized_client",    // 客户端未授权
+		"access_denied",          // 访问被拒绝
+		"missing_project_id",     // 缺少 project_id
 		"no refresh token available",
 	}
 	for _, needle := range nonRetryable {

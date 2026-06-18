@@ -155,11 +155,34 @@ func (Group) Fields() []ent.Field {
 			Default(domain.OpenAIMessagesDispatchModelConfig{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
 			Comment("OpenAI Messages 调度模型配置：按 Claude 系列/精确模型映射到目标 GPT 模型"),
+		field.JSON("models_list_config", domain.GroupModelsListConfig{}).
+			Default(domain.GroupModelsListConfig{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("自定义 /v1/models 展示列表配置；仅影响模型列表响应，不影响调度"),
 
 		// 分组级每分钟请求数上限（0 = 不限制）。设置后优先于用户级兜底生效。
 		field.Int("rpm_limit").
 			Default(0).
 			Comment("分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流"),
+
+		// Kiro 模拟缓存配置（仅 Kiro 平台生效）
+		field.Bool("kiro_cache_emulation_enabled").
+			Default(false).
+			Comment("是否启用 Kiro 模拟缓存（仅 kiro 分组生效）"),
+		field.Bool("kiro_auto_sticky_enabled").
+			Default(true).
+			Comment("是否启用 Kiro 自动会话粘性路由（仅 kiro 分组生效）"),
+		field.Int("kiro_sticky_session_ttl_seconds").
+			Default(3600).
+			Comment("Kiro 自动会话粘性绑定 TTL（秒，仅 kiro 分组生效）"),
+		field.Float("kiro_cache_emulation_ratio").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(5,4)"}).
+			Default(1.0).
+			Comment("Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）"),
+		field.String("kiro_endpoint_mode").
+			MaxLen(8).
+			Default("q").
+			Comment("Kiro 推理 endpoint：q=AWS Q (q.{region}.amazonaws.com), krs=Kiro Runtime Service (runtime.us-east-1.kiro.dev)"),
 	}
 }
 

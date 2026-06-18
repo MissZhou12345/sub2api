@@ -10,6 +10,7 @@
       aria-label="Select option"
       :class="[
         'select-trigger',
+        size === 'sm' && 'select-trigger-sm',
         isOpen && 'select-trigger-open',
         error && 'select-trigger-error',
         disabled && 'select-trigger-disabled'
@@ -22,10 +23,22 @@
           {{ selectedLabel }}
         </slot>
       </span>
+      <span
+        v-if="clearable && hasValue && !disabled"
+        class="select-clear"
+        role="button"
+        tabindex="-1"
+        aria-label="Clear selection"
+        @click.stop="clearSelection"
+        @mousedown.stop
+        @keydown.enter.stop.prevent="clearSelection"
+      >
+        <Icon name="x" size="sm" />
+      </span>
       <span class="select-icon">
         <Icon
           name="chevronDown"
-          size="md"
+          :size="size === 'sm' ? 'sm' : 'md'"
           :class="['transition-transform duration-200', isOpen && 'rotate-180']"
         />
       </span>
@@ -38,7 +51,7 @@
           v-if="isOpen"
           ref="dropdownRef"
           class="select-dropdown-portal"
-          :class="[instanceId]"
+          :class="[instanceId, size === 'sm' && 'select-dropdown-sm']"
           :style="dropdownStyle"
           role="listbox"
           @click.stop
@@ -135,6 +148,8 @@ interface Props {
   labelKey?: string
   creatable?: boolean
   creatablePrefix?: string
+  size?: 'sm' | 'md'
+  clearable?: boolean
 }
 
 interface Emits {
@@ -148,8 +163,10 @@ const props = withDefaults(defineProps<Props>(), {
   searchable: 'auto',
   creatable: false,
   creatablePrefix: '',
+  clearable: false,
   valueKey: 'value',
-  labelKey: 'label'
+  labelKey: 'label',
+  size: 'md'
 })
 
 const emit = defineEmits<Emits>()
@@ -238,6 +255,10 @@ const selectedLabel = computed(() => {
   }
   return placeholderText.value
 })
+
+const hasValue = computed(
+  () => props.modelValue !== null && props.modelValue !== undefined && props.modelValue !== ''
+)
 
 const filteredOptions = computed(() => {
   let opts = props.options as any[]
@@ -355,6 +376,12 @@ const selectOption = (option: any) => {
   triggerRef.value?.focus()
 }
 
+const clearSelection = () => {
+  if (props.disabled) return
+  emit('update:modelValue', null)
+  emit('change', null, null)
+}
+
 // Keyboards
 const onTriggerKeyDown = () => {
   if (!isOpen.value) {
@@ -446,6 +473,11 @@ onUnmounted(() => {
   @apply border-primary-500 ring-2 ring-primary-500/30;
 }
 
+/* 紧凑尺寸：对齐原 input py-1 text-xs 的高度，用于内联紧凑下拉 */
+.select-trigger-sm {
+  @apply px-2.5 py-1 text-xs rounded-lg;
+}
+
 .select-trigger-error {
   @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
 }
@@ -460,6 +492,12 @@ onUnmounted(() => {
 
 .select-icon {
   @apply flex-shrink-0 text-gray-400 dark:text-dark-400;
+}
+
+.select-clear {
+  @apply flex flex-shrink-0 cursor-pointer items-center justify-center;
+  @apply rounded text-gray-400 transition-colors;
+  @apply hover:text-gray-600 dark:hover:text-gray-200;
 }
 </style>
 
@@ -487,7 +525,7 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-options {
-  @apply max-h-60 overflow-y-auto py-1 outline-none;
+  @apply max-h-80 overflow-y-auto py-1 outline-none;
 }
 
 .select-dropdown-portal .select-option {
@@ -530,6 +568,35 @@ onUnmounted(() => {
 .select-dropdown-portal .select-empty {
   @apply px-4 py-8 text-center text-sm;
   @apply text-gray-500 dark:text-dark-400;
+}
+
+/* 紧凑尺寸下拉面板：选项行/搜索框收紧，宽度跟随触发器 */
+.select-dropdown-portal.select-dropdown-sm {
+  @apply min-w-0 rounded-lg;
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-search {
+  @apply px-2 py-1.5;
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-search-input {
+  @apply text-xs;
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-options {
+  @apply py-0.5;
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-option {
+  @apply px-2.5 py-1.5 text-xs;
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-option-group {
+  @apply px-2.5 py-1 text-[10px];
+}
+
+.select-dropdown-portal.select-dropdown-sm .select-empty {
+  @apply px-2.5 py-4 text-xs;
 }
 
 .select-dropdown-enter-active,
