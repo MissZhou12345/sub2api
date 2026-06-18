@@ -35,8 +35,19 @@ fi
 echo "[INFO] BUILD_VERSION=${BUILD_VERSION}"
 echo "[INFO] Running: ${DC[*]} ..."
 
+# 记录当前镜像 ID，用于部署后清理
+OLD_IMAGES=$("${DC[@]}" images -q 2>/dev/null || true)
+
 "${DC[@]}" pull
 "${DC[@]}" down
+
+# 清理旧镜像
+if [[ -n "${OLD_IMAGES}" ]]; then
+  echo "[INFO] Removing old images..."
+  # shellcheck disable=SC2086
+  docker rmi ${OLD_IMAGES} 2>/dev/null || true
+fi
+
 "${DC[@]}" up -d
 "${DC[@]}" ps
 

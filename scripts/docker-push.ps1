@@ -127,6 +127,10 @@ $buildExit = $LASTEXITCODE
 Write-StepLog '<<< STEP: docker buildx build --push done'
 Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build/push failed. Re-run to login again if unauthorized.'
 
+Write-StepLog '>>> STEP: docker builder prune (clean build cache)'
+docker builder prune -f
+Write-StepLog '<<< STEP: build cache cleaned'
+
 Write-Host ''
 Write-Host '========================================'
 Write-Host ' Done'
