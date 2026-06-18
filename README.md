@@ -16,6 +16,17 @@ English | [日本語](README_JA.md)
 
 </div>
 
+
+## 发布
+
+```shell
+cd /root/workspace/sub2api/deploy \
+&& docker-compose -f docker-compose.local.yml --env-file .env --env-file .version  pull \
+&& docker-compose -f docker-compose.local.yml --env-file .env --env-file .version down \
+&& docker-compose -f docker-compose.local.yml --env-file .env --env-file .version up -d
+```
+
+
 ## ⚠️ Important Notice
 
 Please read the following carefully before using this project:
