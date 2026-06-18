@@ -26,7 +26,7 @@ cd /root/workspace/sub2api/deploy \
 && docker-compose -f docker-compose.local.yml --env-file .env --env-file .version up -d
 
 
-cd /root/workspace/sub2api/deploy && +x deploy-local.sh
+cd /root/workspace/sub2api/deploy && chmod +x deploy-local.sh
 
 cd /root/workspace/sub2api/deploy \
 ./deploy-local.sh

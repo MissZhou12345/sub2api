@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Continue'
 
 $env:DOCKER_BUILDKIT = '1'
 $env:BUILDKIT_PROGRESS = 'plain'
+$env:BUILDX_NO_DEFAULT_ATTESTATIONS = '1'
 
 $Registry    = 'registry.cn-chengdu.aliyuncs.com'
 $ImageRepo   = "$Registry/mz-andy/sub2api"
@@ -107,8 +108,11 @@ $BuildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 Write-Host "[INFO] DATE=$BuildDate"
 Write-Host ''
 
-Write-StepLog '>>> STEP: docker build'
-docker build -t $LocalTag `
+Write-StepLog '>>> STEP: docker buildx build'
+docker buildx build `
+    --load `
+    --provenance=false `
+    -t $LocalTag `
     --progress=plain `
     --build-arg "VERSION=$Version" `
     --build-arg "COMMIT=$Commit" `
@@ -119,10 +123,7 @@ docker build -t $LocalTag `
     -f Dockerfile .
 
 
-Write-StepLog '<<< STEP: docker build done1'
-
 $buildExit = $LASTEXITCODE
-Write-StepLog '<<< STEP: docker build done2'
 Write-StepLog '<<< STEP: docker build done'
 Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build failed.'
 
