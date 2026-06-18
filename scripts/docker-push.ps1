@@ -102,17 +102,17 @@ $LocalTag = "sub2api:$Version"
 $RemoteTag = "${ImageRepo}:$Version"
 
 Write-Host "[INFO] BUILD_VERSION=$Version"
-Write-Host "[INFO] Local tag:  $LocalTag"
+Write-Host "[INFO] Local tag:  $LocalTag (not loaded during push build)"
 Write-Host "[INFO] Remote tag: $RemoteTag"
 $BuildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 Write-Host "[INFO] DATE=$BuildDate"
 Write-Host ''
 
-Write-StepLog '>>> STEP: docker buildx build'
+Write-StepLog ">>> STEP: docker buildx build --push ($RemoteTag)"
 docker buildx build `
-    --load `
+    --push `
     --provenance=false `
-    -t $LocalTag `
+    -t $RemoteTag `
     --progress=plain `
     --build-arg "VERSION=$Version" `
     --build-arg "COMMIT=$Commit" `
@@ -124,21 +124,8 @@ docker buildx build `
 
 
 $buildExit = $LASTEXITCODE
-Write-StepLog '<<< STEP: docker build done'
-Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build failed.'
-
-Write-StepLog ">>> STEP: docker tag ($LocalTag -> $RemoteTag)"
-docker tag $LocalTag $RemoteTag
-$tagExit = $LASTEXITCODE
-Write-StepLog '<<< STEP: docker tag done'
-Assert-DockerOk -ExitCode $tagExit -ErrorMessage '[ERROR] docker tag failed.'
-
-Write-StepLog ">>> STEP: docker push ($RemoteTag)"
-Write-StepLog 'Upload may take several minutes; layer progress should appear below.'
-docker push $RemoteTag
-$pushExit = $LASTEXITCODE
-Write-StepLog '<<< STEP: docker push done'
-Assert-DockerOk -ExitCode $pushExit -ErrorMessage '[ERROR] docker push failed. Re-run to login again if unauthorized.'
+Write-StepLog '<<< STEP: docker buildx build --push done'
+Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build/push failed. Re-run to login again if unauthorized.'
 
 Write-Host ''
 Write-Host '========================================'
