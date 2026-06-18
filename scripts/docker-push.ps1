@@ -131,6 +131,16 @@ Write-StepLog '>>> STEP: docker builder prune (clean build cache)'
 docker builder prune -f
 Write-StepLog '<<< STEP: build cache cleaned'
 
+Write-StepLog '>>> STEP: remove local images'
+foreach ($tag in @($RemoteTag, $LocalTag)) {
+    $exists = docker image inspect $tag 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        docker rmi $tag | Out-Null
+        Write-Host "[INFO] Removed local image: $tag"
+    }
+}
+Write-StepLog '<<< STEP: local images removed'
+
 Write-Host ''
 Write-Host '========================================'
 Write-Host ' Done'
