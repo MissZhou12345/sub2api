@@ -1,17 +1,37 @@
 # Sub2API - build image and push to Aliyun Container Registry
 # Called by docker-push.bat in repo root
 
-$ErrorActionPreference = 'Stop'
+# Do NOT use Stop: docker CLI logs to stderr and would abort the script after build
+$ErrorActionPreference = 'Continue'
 
-$Registry   = 'registry.cn-chengdu.aliyuncs.com'
-$ImageRepo  = "$Registry/mz-andy/sub2api"
-$DockerUser = '517013774@qq.com'
-$Commit     = 'prod'
-$EnvFile    = Join-Path $PSScriptRoot '..\deploy\.version'
-$RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$LocalTag   = 'sub2api:latest'
+$env:DOCKER_BUILDKIT = '1'
+$env:BUILDKIT_PROGRESS = 'plain'
 
-# Inherit HTTP_PROXY / HTTPS_PROXY from parent bat (for faster docker build)
+$Registry    = 'registry.cn-chengdu.aliyuncs.com'
+$ImageRepo   = "$Registry/mz-andy/sub2api"
+$DockerUser  = '517013774@qq.com'
+$Commit      = 'prod'
+$VersionFile = Join-Path $PSScriptRoot '..\deploy\.version'
+$RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
+function Write-StepLog {
+    param([string]$Message)
+    $ts = Get-Date -Format 'HH:mm:ss'
+    Write-Host "[$ts] $Message"
+}
+
+function Assert-DockerOk {
+    param(
+        [int]$ExitCode,
+        [string]$ErrorMessage
+    )
+    Write-StepLog "exit code = $ExitCode"
+    if ($ExitCode -ne 0) {
+        Write-Host $ErrorMessage -ForegroundColor Red
+        exit 1
+    }
+}
+
 if ($env:HTTP_PROXY)  { Write-Host "[INFO] HTTP_PROXY=$($env:HTTP_PROXY)" }
 if ($env:HTTPS_PROXY) { Write-Host "[INFO] HTTPS_PROXY=$($env:HTTPS_PROXY)" }
 
@@ -22,18 +42,10 @@ Write-Host ' Sub2API Docker Build and Push'
 Write-Host '========================================'
 Write-Host ''
 
-# 1. Check Docker engine
-$prevEap = $ErrorActionPreference
-$ErrorActionPreference = 'SilentlyContinue'
-docker info *> $null
-$dockerOk = ($LASTEXITCODE -eq 0)
-$ErrorActionPreference = $prevEap
-if (-not $dockerOk) {
-    Write-Host '[ERROR] Docker is not running. Please start Docker Desktop.' -ForegroundColor Red
-    exit 1
-}
+Write-StepLog 'Checking Docker engine...'
+docker version *> $null
+Assert-DockerOk -ExitCode $LASTEXITCODE -ErrorMessage '[ERROR] Docker is not running. Please start Docker Desktop.'
 
-# 2. Check registry login; interactive login if needed
 function Test-DockerRegistryLogin {
     param([string]$RegistryHost)
     $cfgPath = Join-Path $env:USERPROFILE '.docker\config.json'
@@ -48,10 +60,7 @@ if (-not (Test-DockerRegistryLogin -RegistryHost $Registry)) {
     Write-Host "[INFO] Not logged in to $Registry. Please enter password:"
     Write-Host ''
     docker login --username=$DockerUser $Registry
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host '[ERROR] docker login failed.' -ForegroundColor Red
-        exit 1
-    }
+    Assert-DockerOk -ExitCode $LASTEXITCODE -ErrorMessage '[ERROR] docker login failed.'
     Write-Host ''
 }
 else {
@@ -59,13 +68,12 @@ else {
     Write-Host ''
 }
 
-# 3. Read BUILD_VERSION from deploy\.env and increment by 1
-if (-not (Test-Path $EnvFile)) {
-    Write-Host "[ERROR] Env file not found: $EnvFile" -ForegroundColor Red
+if (-not (Test-Path $VersionFile)) {
+    Write-Host "[ERROR] Version file not found: $VersionFile" -ForegroundColor Red
     exit 1
 }
 
-$lines = Get-Content $EnvFile -Encoding UTF8
+$lines = Get-Content $VersionFile -Encoding UTF8
 $found = $false
 $newVersion = 1
 
@@ -87,17 +95,21 @@ if (-not $found) {
     $newVersion = 1
 }
 
-$lines | Set-Content $EnvFile -Encoding UTF8
+$lines | Set-Content $VersionFile -Encoding UTF8
 $Version = $newVersion
+$LocalTag = "sub2api:$Version"
+$RemoteTag = "${ImageRepo}:$Version"
 
 Write-Host "[INFO] BUILD_VERSION=$Version"
+Write-Host "[INFO] Local tag:  $LocalTag"
+Write-Host "[INFO] Remote tag: $RemoteTag"
 $BuildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 Write-Host "[INFO] DATE=$BuildDate"
 Write-Host ''
 
-# 4. docker build
-Write-Host '[INFO] Starting docker build...'
+Write-StepLog '>>> STEP: docker build'
 docker build -t $LocalTag `
+    --progress=plain `
     --build-arg "VERSION=$Version" `
     --build-arg "COMMIT=$Commit" `
     --build-arg "DATE=$BuildDate" `
@@ -106,36 +118,32 @@ docker build -t $LocalTag `
     --build-arg "NPM_CONFIG_REGISTRY=https://registry.npmmirror.com" `
     -f Dockerfile .
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '[ERROR] docker build failed.' -ForegroundColor Red
-    exit 1
-}
 
-Write-Host ''
-Write-Host '[INFO] docker build succeeded.'
-Write-Host ''
+Write-StepLog '<<< STEP: docker build done1'
 
-# 5. tag and push
-$RemoteTag = "${ImageRepo}:$Version"
-Write-Host "[INFO] Tagging: $RemoteTag"
+$buildExit = $LASTEXITCODE
+Write-StepLog '<<< STEP: docker build done2'
+Write-StepLog '<<< STEP: docker build done'
+Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build failed.'
+
+Write-StepLog ">>> STEP: docker tag ($LocalTag -> $RemoteTag)"
 docker tag $LocalTag $RemoteTag
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '[ERROR] docker tag failed.' -ForegroundColor Red
-    exit 1
-}
+$tagExit = $LASTEXITCODE
+Write-StepLog '<<< STEP: docker tag done'
+Assert-DockerOk -ExitCode $tagExit -ErrorMessage '[ERROR] docker tag failed.'
 
-Write-Host "[INFO] Pushing: $RemoteTag"
+Write-StepLog ">>> STEP: docker push ($RemoteTag)"
+Write-StepLog 'Upload may take several minutes; layer progress should appear below.'
 docker push $RemoteTag
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '[ERROR] docker push failed. Re-run to login again if unauthorized.' -ForegroundColor Red
-    exit 1
-}
+$pushExit = $LASTEXITCODE
+Write-StepLog '<<< STEP: docker push done'
+Assert-DockerOk -ExitCode $pushExit -ErrorMessage '[ERROR] docker push failed. Re-run to login again if unauthorized.'
 
 Write-Host ''
 Write-Host '========================================'
 Write-Host ' Done'
 Write-Host " Image: $RemoteTag"
-Write-Host " Version: $Version (saved to deploy\.env)"
+Write-Host " Version: $Version (saved to deploy\.version)"
 Write-Host " Date: $BuildDate"
 Write-Host '========================================'
 

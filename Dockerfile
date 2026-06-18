@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Sub2API Multi-Stage Dockerfile
 # =============================================================================
@@ -27,9 +28,10 @@ WORKDIR /app/frontend
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
 RUN npm install -g pnpm@9 --registry="${NPM_CONFIG_REGISTRY}"
 
-# Install dependencies first (better caching)
+# Install dependencies first (better caching; BuildKit cache speeds up repeat builds)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=sub2api-pnpm-store \
+    pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy frontend source and build.
 # LegalDocumentView.vue (admin-compliance gate) build-time imports
@@ -60,9 +62,10 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
-# Copy go mod files first (better caching)
+# Copy go mod files first (better caching; BuildKit cache speeds up repeat downloads)
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod,id=sub2api-go-mod \
+    go mod download
 
 # Copy backend source first
 COPY backend/ ./
@@ -72,7 +75,9 @@ COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
 # Version precedence: build arg VERSION > cmd/server/VERSION
-RUN VERSION_VALUE="${VERSION}" && \
+RUN --mount=type=cache,target=/go/pkg/mod,id=sub2api-go-mod \
+    --mount=type=cache,target=/root/.cache/go-build,id=sub2api-go-build \
+    VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(tr -d '\r\n' < ./cmd/server/VERSION)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=0 GOOS=linux go build \
