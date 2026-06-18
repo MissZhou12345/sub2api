@@ -133,9 +133,8 @@ Write-StepLog '<<< STEP: build cache cleaned'
 
 Write-StepLog '>>> STEP: remove local images'
 foreach ($tag in @($RemoteTag, $LocalTag)) {
-    $exists = docker image inspect $tag 2>$null
+    $out = docker rmi $tag 2>&1
     if ($LASTEXITCODE -eq 0) {
-        docker rmi $tag | Out-Null
         Write-Host "[INFO] Removed local image: $tag"
     }
 }
