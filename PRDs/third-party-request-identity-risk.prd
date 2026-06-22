@@ -102,11 +102,19 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 "X-Stainless-Runtime-Version": "v24.3.0",
 ```
 
-**问题**: 所有账户使用完全相同的 OS、Arch、Runtime 组合。真实用户群体中这些字段会有分布差异，而 sub2api 的请求在统计上会表现为"所有请求来自完全相同的环境"。
+**问题**: 所有账户使用完全相同的 OS、Arch、Runtime 组合，在统计上表现为"大量请求来自完全相同的环境"。
 
-**影响**: Anthropic 可通过字段分布异常识别批量代理行为，风险相对较低但值得关注。
+**影响**: Anthropic 可通过字段分布异常识别批量代理行为。
 
-**建议修复**: 可对这些字段引入合理的随机化范围（如 OS 在 Linux/macOS 间分布，arch 在 x86_64/arm64 间分布），模拟真实用户多样性。
+**场景分析**:
+
+| 出口 IP 情况 | 是否随机化 OS/Arch | 风险评估 |
+|------------|-----------------|---------|
+| 有代理，IP 多样 | 随机化 | 推荐：IP 不同 + UA 不同，模拟多台真实设备 |
+| 无代理，固定服务器 IP | 随机化 | **更危险**：同一 IP 出现多种"设备"，真实用户不会这样，反而是更强的异常信号 |
+| 无代理，固定服务器 IP | 保持固定 | 可接受：表现为"一台固定机器"，与 CI/服务器场景一致 |
+
+**建议修复**: 随机化策略与代理配置联动——账户配置了代理时启用 OS/Arch 随机化，未配置代理时保持固定值，避免同 IP 下出现"设备漂移"。
 
 ---
 
@@ -117,7 +125,7 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 | R1 | OpenAI Session_ID 固定派生 | 高 | 尽快修复 |
 | R2 | Claude UA 版本未跟进 | 中 | 建立版本监控流程 |
 | R3 | Kiro fingerprint hash 固定 | 中 | 下一迭代评估 |
-| R4 | X-Stainless-* 字段无多样性 | 低 | 低优先级 |
+| R4 | X-Stainless-* 随机化需与代理联动 | 低 | 低优先级（需代理改造配合） |
 
 ---
 
@@ -134,4 +142,4 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 - [ ] R1：修改 `compactProbeSessionID` 逻辑，改为随机生成或按会话轮换
 - [ ] R2：为 Claude CLI 版本建立跟踪 issue，定期同步常量
 - [ ] R3：调研 Kiro hash 轮换方案，评估对会话一致性的影响
-- [ ] R4：评估 X-Stainless-* 多样化的收益与维护成本
+- [ ] R4：X-Stainless-* 随机化与代理配置联动，有代理时随机化，无代理时保持固定
