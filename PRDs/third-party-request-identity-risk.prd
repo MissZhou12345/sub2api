@@ -49,7 +49,7 @@ req.Header.Set("Conversation_ID", probeSessionID)
 
 **影响**: OpenAI 可将该账户标记为异常、限流或封禁。
 
-**建议修复**: 每次请求生成随机 Session_ID，或按真实会话周期轮换。
+**建议修复**: 每次请求按真实会话周期轮换。
 
 ---
 
@@ -90,23 +90,11 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 
 ---
 
-### 风险 R4：代理 IP 复用导致跨账户关联
-
-**级别**: 中
-**文件**: `backend/internal/repository/http_upstream.go`
-
-**问题**: 同一代理 IP 为多个账户提供服务。第三方 API 可在 IP 维度发现"同一 IP 在短时间内使用了大量不同账户"，这是代理服务的典型特征。
-
-**影响**: 该 IP 下的所有账户可能被批量关联，触发更严格的风控。
-
-**建议修复**: 尽量做到账户与代理 IP 的强绑定（1账户:1IP 或固定IP池分片），避免同 IP 混用多账户。
-
----
-
-### 风险 R5：X-Stainless-* 头部参数固定不变
+### 风险 R4：X-Stainless-* 头部参数固定不变
 
 **级别**: 低
 **文件**: `backend/internal/pkg/claude/constants.go:97-104`
+
 
 ```go
 "X-Stainless-OS":              "Linux",
@@ -129,8 +117,7 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 | R1 | OpenAI Session_ID 固定派生 | 高 | 尽快修复 |
 | R2 | Claude UA 版本未跟进 | 中 | 建立版本监控流程 |
 | R3 | Kiro fingerprint hash 固定 | 中 | 下一迭代评估 |
-| R4 | 代理 IP 跨账户复用 | 中 | 结合运营策略处理 |
-| R5 | X-Stainless-* 字段无多样性 | 低 | 低优先级 |
+| R4 | X-Stainless-* 字段无多样性 | 低 | 低优先级 |
 
 ---
 
@@ -147,5 +134,4 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 - [ ] R1：修改 `compactProbeSessionID` 逻辑，改为随机生成或按会话轮换
 - [ ] R2：为 Claude CLI 版本建立跟踪 issue，定期同步常量
 - [ ] R3：调研 Kiro hash 轮换方案，评估对会话一致性的影响
-- [ ] R4：梳理代理分配策略，推进账户-IP 强绑定
-- [ ] R5：评估 X-Stainless-* 多样化的收益与维护成本
+- [ ] R4：评估 X-Stainless-* 多样化的收益与维护成本
