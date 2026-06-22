@@ -1,6 +1,6 @@
 # PRD: 第三方大模型请求身份识别风险加固
 
-**文档版本**: v1.0
+**文档版本**: v1.2
 **创建日期**: 2026-06-22
 **作者**: Mz
 **状态**: 草稿
@@ -207,3 +207,92 @@ x-anthropic-billing-header: cc_version=2.1.185.xxx; cc_entrypoint=cli;
 - [ ] R4：X-Stainless-* 随机化与代理配置联动，有代理时随机化，无代理时保持固定
 - [ ] R6：调研 `utls` 库接入成本，评估 Anthropic 是否实际执行 JA3 检测
 - [ ] R7：在用户文档中增加提示，避免在 Claude Code 会话内容中出现 `sub2api` 等关键词
+
+---
+
+## 7. 验证方法（每项改动上线前必做）
+
+> 改动质量的底线：**没有通过验证的修复不比不改强**。以下方法对应各风险点，改动完成后必须完成对应验证才能视为完成。
+
+### 7.1 Header 层验证（R1、R2、R4、R5）
+
+使用 mitmproxy 同时抓取真实 CLI 流量和 sub2api 流量，做逐字段 diff：
+
+```powershell
+# 启动 mitmproxy
+mitmproxy --listen-port 8080 --save-stream-file capture.mitm
+
+# 让 sub2api 走本地代理
+$env:HTTPS_PROXY = "http://127.0.0.1:8080"
+```
+
+验收标准：sub2api 的请求 headers 与真实 CLI 抓包结果无非预期差异。
+
+对于 **R1 Session_ID 随机化**，必须补单元测试：
+
+```go
+// 同一账户连续两次生成，值必须不同
+assert.NotEqual(t, buildSessionID(account), buildSessionID(account))
+// 同一会话内多次调用，值必须稳定
+sid := buildSessionID(account)
+assert.Equal(t, sid, buildSessionID(account))
+```
+
+对于 **R5 版本一致性**，在启动时加自检断言，防止版本漂移上线：
+
+```go
+// 进程启动时执行，确保两处版本号一致
+billingVersion := extractVersionFromBillingHeader(DefaultBillingHeader)
+if billingVersion != CLICurrentVersion {
+    panic("billing header version mismatch with CLICurrentVersion")
+}
+```
+
+### 7.2 TLS 指纹验证（R6）
+
+用 Go 客户端和真实 Node.js 分别访问 [https://tls.peet.ws/api/all](https://tls.peet.ws/api/all)，对比 JA3/JA4 字段：
+
+```powershell
+# Node.js 基准值
+node -e "const https = require('https'); https.get('https://tls.peet.ws/api/all', r => r.pipe(process.stdout))"
+
+# Go 客户端实际值（通过 sub2api 发出）
+curl --proxy http://127.0.0.1:8080 https://tls.peet.ws/api/all
+```
+
+验收标准：引入 `utls` 后，Go 客户端的 JA3 hash 与 Node.js 基准值一致。
+
+### 7.3 行为层整体验证
+
+**影子流量对比**：改动前后各发 10 次请求到 [https://httpbin.org/headers](https://httpbin.org/headers)，记录完整快照，确认改动范围符合预期、没有引入新的异常字段。
+
+**金丝雀账号观察**：
+- 每次重大改动后，先在 2-3 个低价值测试账号上运行 24-48 小时
+- 观察封禁率、限流率是否异常
+- 确认正常后再推广到正式账号池
+
+---
+
+## 8. 上游合并兼容原则
+
+本项目需要定期合并上游（Wei-Shaw/sub2api）的更新。所有反侦测改动必须遵循以下原则，避免合并冲突或被上游覆盖。
+
+### 8.1 改动隔离策略
+
+**禁止直接修改上游文件中的常量**。应通过覆盖或注入的方式实现，将改动集中在独立文件中。
+
+| 风险 | 错误做法 | 正确做法 |
+|------|---------|---------|
+| R1 Session_ID | 直接改 `account_test_service.go` 中的生成逻辑 | 抽取 `session_id_builder.go`，通过接口注入 |
+| R2/R5 版本号 | 直接改 `constants.go` 中的 `CLICurrentVersion` | 在独立的 `version_override.go` 中覆盖，版本更新只改这一处 |
+| R4 X-Stainless-* | 直接改 `DefaultHeaders` map | 新增 `BuildHeaders(account) map[string]string`，在调用侧替换 |
+
+### 8.2 合并冲突处理规则
+
+1. **上游改了 constants.go**：检查新版本号，同步更新 `version_override.go`，以上游为准
+2. **上游改了 Session_ID 生成逻辑**：评估上游改动是否已经解决了 R1，若已解决则撤销本地改动，避免双重处理
+3. **上游改了 fingerprint.go**：重新评估 R3，以上游最新逻辑为基准
+
+### 8.3 合并后必做的回归验证
+
+每次合并上游后，按 **第 7 节** 重新执行一遍 Header 层验证，确认上游改动没有破坏已有的反侦测逻辑，且没有引入新的版本不一致。
