@@ -1,0 +1,151 @@
+# PRD: 第三方大模型请求身份识别风险加固
+
+**文档版本**: v1.0
+**创建日期**: 2026-06-22
+**作者**: Mz
+**状态**: 草稿
+
+---
+
+## 1. 背景
+
+sub2api 在向 Claude、OpenAI、Gemini、Kiro 等第三方大模型发请求时，通过模拟官方 CLI 客户端的 HTTP 请求头（User-Agent、X-Stainless-*、Originator 等）来降低被识别的风险。
+
+本次排查发现，**请求头层面没有直接泄露 sub2api 字样**，但存在若干"行为指纹"层面的风险，第三方服务可通过统计分析手段将请求关联到同一代理服务。
+
+---
+
+## 2. 问题范围
+
+### 2.1 排查覆盖的模型/服务
+
+| 服务 | 主要请求文件 |
+|------|-------------|
+| Claude / Anthropic | `backend/internal/pkg/claude/constants.go` |
+| OpenAI / Codex | `backend/internal/service/openai_gateway_service.go` |
+| Gemini | `backend/internal/pkg/geminicli/` |
+| Kiro | `backend/internal/pkg/kiro/fingerprint.go` |
+
+### 2.2 不在本 PRD 范围内
+
+- `admin_auth.go` 中 `Sec-WebSocket-Protocol: sub2api-admin` 是内部鉴权用，不对外暴露，不纳入。
+
+---
+
+## 3. 风险点详述
+
+### 风险 R1：OpenAI Session_ID / Conversation_ID 固定派生
+
+**级别**: 高
+**文件**: `backend/internal/service/account_test_service.go:910-911`
+
+```go
+probeSessionID := compactProbeSessionID(account.ID)
+req.Header.Set("Session_ID", probeSessionID)
+req.Header.Set("Conversation_ID", probeSessionID)
+```
+
+**问题**: `Session_ID` 和 `Conversation_ID` 由 `account.ID` 固定派生，同一账户每次请求值相同。OpenAI 侧可通过该字段识别出"同一个 Session 发起了大量不同对话"，行为特征明显异常。
+
+**影响**: OpenAI 可将该账户标记为异常、限流或封禁。
+
+**建议修复**: 每次请求生成随机 Session_ID，或按真实会话周期轮换。
+
+---
+
+### 风险 R2：Claude User-Agent 版本未跟进官方更新
+
+**级别**: 中
+**文件**: `backend/internal/pkg/claude/constants.go:96`
+
+```go
+"User-Agent": "claude-cli/" + CLICurrentVersion + " (external, cli)",
+```
+
+**问题**: `CLICurrentVersion` 是硬编码常量。官方 Claude CLI 持续迭代，若 sub2api 使用的版本明显落后于当前市场版本，Anthropic 可在统计层面识别出"大量请求来自同一旧版本"。
+
+**影响**: 版本过旧的 UA 可能触发 Anthropic 的风控规则，导致 OAuth Token 被限制。
+
+**建议修复**: 建立 CLI 版本监控机制，官方更新后及时同步 `CLICurrentVersion` 及 `X-Stainless-Package-Version` 等相关常量。
+
+---
+
+### 风险 R3：Kiro fingerprint hash 每账户固定不变
+
+**级别**: 中
+**文件**: `backend/internal/pkg/kiro/fingerprint.go:214`
+
+```go
+func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
+    fp := globalRuntimeFingerprints().Get(accountKey, machineID)
+    return fmt.Sprintf("KiroIDE %s %s", kiroIDEUserAgentVersion, fp.KiroHash)
+}
+```
+
+**问题**: `KiroHash` 基于 `accountKey + machineID` 派生，进程生命周期内固定。AWS/Kiro 后端可用该 hash 作为设备指纹，长期追踪同一账户的所有请求。
+
+**影响**: Kiro 后端可能检测到"同一设备指纹发起了异常高频请求"，触发限流或封禁。
+
+**建议修复**: 评估是否可按时间窗口或会话周期轮换 KiroHash，同时保持单次会话内的一致性。
+
+---
+
+### 风险 R4：代理 IP 复用导致跨账户关联
+
+**级别**: 中
+**文件**: `backend/internal/repository/http_upstream.go`
+
+**问题**: 同一代理 IP 为多个账户提供服务。第三方 API 可在 IP 维度发现"同一 IP 在短时间内使用了大量不同账户"，这是代理服务的典型特征。
+
+**影响**: 该 IP 下的所有账户可能被批量关联，触发更严格的风控。
+
+**建议修复**: 尽量做到账户与代理 IP 的强绑定（1账户:1IP 或固定IP池分片），避免同 IP 混用多账户。
+
+---
+
+### 风险 R5：X-Stainless-* 头部参数固定不变
+
+**级别**: 低
+**文件**: `backend/internal/pkg/claude/constants.go:97-104`
+
+```go
+"X-Stainless-OS":              "Linux",
+"X-Stainless-Arch":            "arm64",
+"X-Stainless-Runtime-Version": "v24.3.0",
+```
+
+**问题**: 所有账户使用完全相同的 OS、Arch、Runtime 组合。真实用户群体中这些字段会有分布差异，而 sub2api 的请求在统计上会表现为"所有请求来自完全相同的环境"。
+
+**影响**: Anthropic 可通过字段分布异常识别批量代理行为，风险相对较低但值得关注。
+
+**建议修复**: 可对这些字段引入合理的随机化范围（如 OS 在 Linux/macOS 间分布，arch 在 x86_64/arm64 间分布），模拟真实用户多样性。
+
+---
+
+## 4. 风险优先级总览
+
+| 编号 | 风险描述 | 级别 | 建议处理时机 |
+|------|---------|------|------------|
+| R1 | OpenAI Session_ID 固定派生 | 高 | 尽快修复 |
+| R2 | Claude UA 版本未跟进 | 中 | 建立版本监控流程 |
+| R3 | Kiro fingerprint hash 固定 | 中 | 下一迭代评估 |
+| R4 | 代理 IP 跨账户复用 | 中 | 结合运营策略处理 |
+| R5 | X-Stainless-* 字段无多样性 | 低 | 低优先级 |
+
+---
+
+## 5. 当前未发现的问题（已确认安全）
+
+- 请求头中**无 sub2api 字样**泄露给第三方 API。
+- Claude、OpenAI、Kiro 均使用对应官方客户端的 UA 格式，单次请求无法直接识别为代理服务。
+- Kiro 使用了随机 `Amz-Sdk-Invocation-Id`（`uuid.NewString()`），单次请求层面无固定标识。
+
+---
+
+## 6. 后续行动
+
+- [ ] R1：修改 `compactProbeSessionID` 逻辑，改为随机生成或按会话轮换
+- [ ] R2：为 Claude CLI 版本建立跟踪 issue，定期同步常量
+- [ ] R3：调研 Kiro hash 轮换方案，评估对会话一致性的影响
+- [ ] R4：梳理代理分配策略，推进账户-IP 强绑定
+- [ ] R5：评估 X-Stainless-* 多样化的收益与维护成本
