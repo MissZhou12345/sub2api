@@ -118,14 +118,76 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 
 ---
 
+---
+
+### 风险 R5：x-anthropic-billing-header 泄露客户端版本
+
+**级别**: 高
+**来源**: 社区逆向分析（[claude-code billing header 分析](https://gist.github.com/NTT123/579183bdd7e028880d06c8befae73b99)）
+
+**问题**: Claude Code 在每次请求中注入 `x-anthropic-billing-header`，格式为：
+```
+x-anthropic-billing-header: cc_version=2.1.185.xxx; cc_entrypoint=cli;
+```
+该 header 由客户端计算生成，包含 CLI 版本和入口点信息。Anthropic 使用它做计费验证和使用来源追踪。sub2api 如果伪造或跳过该字段，或者版本号与 `User-Agent` 中的 CLI 版本不一致，就会形成矛盾信号，触发异常检测。
+
+**影响**: Anthropic 可通过 billing header 与 UA 版本的不一致性识别出非官方客户端。
+
+**建议修复**: 确保 `x-anthropic-billing-header` 与 `User-Agent` 中的 `CLICurrentVersion` 保持严格一致，版本更新时同步更新两处。
+
+---
+
+### 风险 R6：TLS 握手指纹（JA3/JA4）与宣称客户端不符
+
+**级别**: 中
+**来源**: [HTTP/2 and HTTP/3 Fingerprinting — Scrapfly](https://scrapfly.io/blog/posts/http2-http3-fingerprinting-guide)、[TLS-Fingerprint-API](https://github.com/Carcraftz/TLS-Fingerprint-API)
+
+**问题**: TLS ClientHello 包在 HTTP 层之前就已被服务端记录，其中的加密套件顺序、扩展列表、GREASE 值等参数会生成 JA3/JA4 指纹。Go 标准库（`net/http`）的 TLS 指纹与 Node.js（真实 Claude CLI 的运行时）截然不同。sub2api 用 Go 发出的请求，UA 宣称是 Node.js 运行时，但 TLS 层已经暴露了实际是 Go 客户端。
+
+**影响**: Anthropic 或其 CDN（如 Cloudflare）可在网络层识别出"伪装成 Node.js 的 Go 客户端"，无需分析任何 HTTP header。
+
+**建议修复**: 评估引入 [`utls`](https://github.com/refraction-networking/utls) 库来模拟 Chrome/Node.js 的 TLS ClientHello 指纹；或在短期内评估实际风险优先级，因为 Anthropic 当前是否主动做 JA3 检测尚不确定。
+
+---
+
+### 风险 R7：Anthropic 对第三方 Harness 的 Git 内容扫描
+
+**级别**: 中
+**来源**: [MindStudio — Anthropic harness detection analysis](https://www.mindstudio.ai/blog/anthropic-harness-detection-git-commit-billing-overcharge)
+
+**问题**: Anthropic 会扫描请求上下文（包括 system prompt 和 git commit 内容）中的关键词，如 `hermes.md`、`OpenClaw`、`sub2api` 等第三方 harness 标识。一旦检测到，账号会被切换至 API 计费模式或触发审查。
+
+**影响**: 若用户在 Claude Code 会话中提交了含有 `sub2api` 字样的 commit message 或在 system prompt 里带有相关标识，可能导致账号被识别和计费切换。
+
+**建议修复**: 这是用户行为层面的风险，sub2api 本身无法完全规避；可在文档中提示用户避免在 Claude Code 会话内容中出现 `sub2api` 等关键词。
+
+---
+
+### 风险 R8：Claude Code 遥测缺失暴露代理特征
+
+**级别**: 低
+**来源**: [cc-gateway README 分析](https://raw.githubusercontent.com/motiful/cc-gateway/main/README.md)
+
+**问题**: 真实 Claude Code CLI 会持续上报 640+ 种遥测事件（设备 ID、OS 版本、Shell 类型、CPU 架构、内存等 40+ 环境维度）。sub2api 作为纯 API 代理，不产生任何遥测上报。若 Anthropic 将"有 API 请求但无遥测"视为异常信号，则可识别出代理行为。
+
+**影响**: 相对间接，Anthropic 需要主动将遥测与 API 流量关联才能触发，当前风险较低。
+
+**建议**: 暂不处理，持续观察 Anthropic 风控策略演进。
+
+---
+
 ## 4. 风险优先级总览
 
 | 编号 | 风险描述 | 级别 | 建议处理时机 |
 |------|---------|------|------------|
 | R1 | OpenAI Session_ID 固定派生 | 高 | 尽快修复 |
+| R5 | x-anthropic-billing-header 版本不一致 | 高 | 与 R2 同步处理 |
 | R2 | Claude UA 版本未跟进 | 中 | 建立版本监控流程 |
 | R3 | Kiro fingerprint hash 固定 | 中 | 下一迭代评估 |
+| R6 | TLS 指纹与宣称运行时不符 | 中 | 评估实际触发概率后决策 |
+| R7 | Git/system prompt 内容扫描 | 中 | 用户文档提示 |
 | R4 | X-Stainless-* 随机化需与代理联动 | 低 | 低优先级（需代理改造配合） |
+| R8 | 遥测缺失暴露代理特征 | 低 | 暂观察 |
 
 ---
 
@@ -140,6 +202,8 @@ func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
 ## 6. 后续行动
 
 - [ ] R1：修改 `compactProbeSessionID` 逻辑，改为随机生成或按会话轮换
-- [ ] R2：为 Claude CLI 版本建立跟踪 issue，定期同步常量
+- [ ] R2 + R5：建立 Claude CLI 版本跟踪机制，`CLICurrentVersion`、`x-anthropic-billing-header`、`X-Stainless-Package-Version` 三处同步更新
 - [ ] R3：调研 Kiro hash 轮换方案，评估对会话一致性的影响
 - [ ] R4：X-Stainless-* 随机化与代理配置联动，有代理时随机化，无代理时保持固定
+- [ ] R6：调研 `utls` 库接入成本，评估 Anthropic 是否实际执行 JA3 检测
+- [ ] R7：在用户文档中增加提示，避免在 Claude Code 会话内容中出现 `sub2api` 等关键词
