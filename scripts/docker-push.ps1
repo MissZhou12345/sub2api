@@ -1,4 +1,4 @@
-# Sub2API - build image and push to Aliyun Container Registry
+﻿# Sub2API - build image and push to Aliyun Container Registry
 # Called by docker-push.bat in repo root
 
 # Do NOT use Stop: docker CLI logs to stderr and would abort the script after build
@@ -30,6 +30,75 @@ function Assert-DockerOk {
     if ($ExitCode -ne 0) {
         Write-Host $ErrorMessage -ForegroundColor Red
         exit 1
+    }
+}
+
+function Test-DockerImageExists {
+    param([string]$Tag)
+    docker image inspect $Tag *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Stop-WedgedBuildProcesses {
+    # The post-build hang lives in docker-buildx.exe (the BuildKit CLI plugin),
+    # NOT in the docker.exe we launched - docker.exe forks buildx and may exit
+    # first, leaving buildx wedged. So kill buildx by NAME to actually clear it.
+    param([System.Diagnostics.Process]$TrackedProc)
+    if ($TrackedProc -and -not $TrackedProc.HasExited) {
+        try { $TrackedProc.Kill() } catch { }
+    }
+    Get-Process -Name 'docker-buildx' -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $_.Kill() } catch { }
+    }
+}
+
+function Invoke-ResilientBuild {
+    # Runs `docker build` but stays immune to the Docker Desktop + containerd
+    # post-build hang: docker finishes the image ("#44 DONE", image is already
+    # in the local store) but docker-buildx.exe sometimes wedges on its
+    # build-record / "View build details" step and never returns. We start
+    # docker with live console output, then poll: once the target image is
+    # present in the store the build is genuinely done, so if the process has
+    # not exited within a short grace window we kill the wedged buildx and go on.
+    param(
+        [string[]]$DockerArgs,
+        [string]$ReadyTag,            # image tag that signals the build finished
+        [int]$GraceSecondsAfterReady = 20,
+        [int]$HardTimeoutSeconds = 1800
+    )
+    $proc = Start-Process -FilePath 'docker' -ArgumentList $DockerArgs `
+        -NoNewWindow -PassThru
+    $start = Get-Date
+    $readyAt = $null
+    while ($true) {
+        $exited = $false
+        try { $exited = $proc.HasExited } catch { $exited = $true }
+        if ($exited -and -not $readyAt) {
+            # Process returned on its own (normal, no hang). Use its exit code.
+            $code = 0
+            try { $code = $proc.ExitCode } catch { $code = 0 }
+            return $code
+        }
+        if (-not $readyAt) {
+            if (Test-DockerImageExists -Tag $ReadyTag) {
+                $readyAt = Get-Date
+                Write-StepLog "image $ReadyTag present in local store; grace ${GraceSecondsAfterReady}s for docker to exit"
+            }
+        }
+        else {
+            if ($exited) { return 0 }   # image ready AND process exited cleanly
+            if (((Get-Date) - $readyAt).TotalSeconds -ge $GraceSecondsAfterReady) {
+                Write-Host "[WARN] image built but docker/buildx did not return (known Docker Desktop hang); killing wedged buildx and continuing." -ForegroundColor Yellow
+                Stop-WedgedBuildProcesses -TrackedProc $proc
+                return 0
+            }
+        }
+        if (((Get-Date) - $start).TotalSeconds -ge $HardTimeoutSeconds) {
+            Write-Host "[ERROR] docker build exceeded $HardTimeoutSeconds s hard timeout." -ForegroundColor Red
+            Stop-WedgedBuildProcesses -TrackedProc $proc
+            return 1
+        }
+        Start-Sleep -Seconds 2
     }
 }
 
@@ -102,30 +171,50 @@ $LocalTag = "sub2api:$Version"
 $RemoteTag = "${ImageRepo}:$Version"
 
 Write-Host "[INFO] BUILD_VERSION=$Version"
-Write-Host "[INFO] Local tag:  $LocalTag (not loaded during push build)"
+Write-Host "[INFO] Local tag:  $LocalTag (built locally, removed after push)"
 Write-Host "[INFO] Remote tag: $RemoteTag"
 $BuildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 Write-Host "[INFO] DATE=$BuildDate"
 Write-Host ''
 
-Write-StepLog ">>> STEP: docker buildx build --push ($RemoteTag)"
-docker buildx build `
-    --push `
-    --provenance=false `
-    -t $RemoteTag `
-    --progress=plain `
-    --build-arg "VERSION=$Version" `
-    --build-arg "COMMIT=$Commit" `
-    --build-arg "DATE=$BuildDate" `
-    --build-arg "GOPROXY=https://goproxy.cn,direct" `
-    --build-arg "GOSUMDB=sum.golang.google.cn" `
-    --build-arg "NPM_CONFIG_REGISTRY=https://registry.npmmirror.com" `
-    -f Dockerfile .
+Write-StepLog ">>> STEP: docker build ($RemoteTag)"
+# Use classic `docker build` + `docker push` instead of `buildx build --push`.
+# Why: on Docker Desktop with the containerd image store, the build finishes
+# ("#44 DONE", image already unpacked into the local store) but the docker CLI
+# can wedge on its post-build "View build details" / build-record step and never
+# return - so push & cleanup never run. Invoke-ResilientBuild detects that the
+# image is already in the store and stops waiting on the wedged CLI.
+# `docker build` is still BuildKit under DOCKER_BUILDKIT=1, so RUN --mount caches
+# keep working. No --provenance: that is a buildx-only flag.
+$buildArgs = @(
+    'build',
+    '-t', $RemoteTag,
+    '-t', $LocalTag,
+    '--progress=plain',
+    '--build-arg', "VERSION=$Version",
+    '--build-arg', "COMMIT=$Commit",
+    '--build-arg', "DATE=$BuildDate",
+    '--build-arg', 'GOPROXY=https://goproxy.cn,direct',
+    '--build-arg', 'GOSUMDB=sum.golang.google.cn',
+    '--build-arg', 'NPM_CONFIG_REGISTRY=https://registry.npmmirror.com',
+    '-f', 'Dockerfile', '.'
+)
+$buildExit = Invoke-ResilientBuild -DockerArgs $buildArgs -ReadyTag $RemoteTag
+Write-StepLog "<<< STEP: docker build done (exit=$buildExit)"
+Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build failed.'
 
+# Guard: make sure the image really exists before pushing (covers the case where
+# the CLI was killed - it should still exist, but verify rather than assume).
+if (-not (Test-DockerImageExists -Tag $RemoteTag)) {
+    Write-Host "[ERROR] image $RemoteTag not found in local store after build." -ForegroundColor Red
+    exit 1
+}
 
-$buildExit = $LASTEXITCODE
-Write-StepLog "<<< STEP: docker buildx build --push done (exit=$buildExit)"
-Assert-DockerOk -ExitCode $buildExit -ErrorMessage '[ERROR] docker build/push failed. Re-run to login again if unauthorized.'
+Write-StepLog ">>> STEP: docker push ($RemoteTag)"
+& docker push $RemoteTag
+$pushExit = $LASTEXITCODE
+Write-StepLog "<<< STEP: docker push done (exit=$pushExit)"
+Assert-DockerOk -ExitCode $pushExit -ErrorMessage '[ERROR] docker push failed. Re-run to login again if unauthorized.'
 
 Write-StepLog '>>> STEP: docker builder prune (clean build cache)'
 docker builder prune -f
