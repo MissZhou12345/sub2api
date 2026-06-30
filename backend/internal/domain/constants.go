@@ -23,6 +23,7 @@ const (
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformKiro        = "kiro"
+	PlatformOpenCodeGo  = "opencode_go"
 )
 
 // Account type constants
@@ -136,6 +137,33 @@ var DefaultKiroModelMapping = map[string]string{
 	"claude-sonnet-4-5-20250929-thinking": "claude-sonnet-4.5",
 	"claude-haiku-4-5-20251001":           "claude-haiku-4.5",
 	"claude-haiku-4-5-20251001-thinking":  "claude-haiku-4.5",
+}
+
+// DefaultOpenCodeGoModelMapping maps Claude Code model names to the default
+// OpenCode Go upstream model. OpenCode Go subscriptions expose GLM-5.2 as an
+// OpenAI-compatible model, while Claude Code clients still speak Anthropic
+// Messages to this gateway.
+var DefaultOpenCodeGoModelMapping = map[string]string{
+	"claude-opus-4-8":                     "glm-5.2",
+	"claude-opus-4-8-thinking":            "glm-5.2",
+	"claude-opus-4-7":                     "glm-5.2",
+	"claude-opus-4-7-thinking":            "glm-5.2",
+	"claude-opus-4-6":                     "glm-5.2",
+	"claude-opus-4-6-thinking":            "glm-5.2",
+	"claude-sonnet-4-6":                   "glm-5.2",
+	"claude-sonnet-4-6-thinking":          "glm-5.2",
+	"claude-opus-4-5-20251101":            "glm-5.2",
+	"claude-opus-4-5-20251101-thinking":   "glm-5.2",
+	"claude-sonnet-4-5-20250929":          "glm-5.2",
+	"claude-sonnet-4-5-20250929-thinking": "glm-5.2",
+	"claude-haiku-4-5":                    "glm-5.2",
+	"claude-haiku-4-5-thinking":           "glm-5.2",
+	"claude-haiku-4-5-20251001":           "glm-5.2",
+	"claude-haiku-4-5-20251001-thinking":  "glm-5.2",
+	"claude-3-5-sonnet-latest":            "glm-5.2",
+	"claude-3-7-sonnet-latest":            "glm-5.2",
+	"claude-sonnet-4-20250514":            "glm-5.2",
+	"claude-opus-4-20250514":              "glm-5.2",
 }
 
 // DefaultBedrockModelMapping 是 AWS Bedrock 平台的默认模型映射

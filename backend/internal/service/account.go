@@ -87,11 +87,10 @@ const (
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 
 const (
-	openCodeGoExtraKeyEnabled             = "opencode_go"
-	openCodeGoExtraKeyAnthropicBaseURL    = "opencode_go_anthropic_base_url"
-	openCodeGoExtraKeyAnthropicModels     = "opencode_go_anthropic_models"
-	openCodeGoDefaultChatCompletionsURL   = "https://opencode.ai/zen/go/v1/chat/completions"
-	openCodeGoDefaultAnthropicMessagesURL = "https://opencode.ai/zen/go/v1/messages"
+	openCodeGoCredentialKeyAnthropicBaseURL = "anthropic_base_url"
+	openCodeGoCredentialKeyAnthropicModels  = "anthropic_models"
+	openCodeGoDefaultChatCompletionsURL     = "https://opencode.ai/zen/go/v1/chat/completions"
+	openCodeGoDefaultAnthropicMessagesURL   = "https://opencode.ai/zen/go/v1/messages"
 )
 
 type TempUnschedulableRule struct {
@@ -554,6 +553,8 @@ func defaultModelMappingForPlatform(platform string) map[string]string {
 		return domain.DefaultAntigravityModelMapping
 	case domain.PlatformKiro:
 		return domain.DefaultKiroModelMapping
+	case domain.PlatformOpenCodeGo:
+		return domain.DefaultOpenCodeGoModelMapping
 	default:
 		return nil
 	}
@@ -767,6 +768,9 @@ func (a *Account) GetBaseURL() string {
 	}
 	baseURL := a.GetCredential("base_url")
 	if baseURL == "" {
+		if a.Platform == PlatformOpenCodeGo {
+			return openCodeGoDefaultChatCompletionsURL
+		}
 		if a.Platform == PlatformKiro {
 			return ""
 		}
@@ -1086,6 +1090,10 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
+func (a *Account) IsOpenCodeGo() bool {
+	return a.Platform == PlatformOpenCodeGo
+}
+
 func (a *Account) IsAnthropic() bool {
 	return a.Platform == PlatformAnthropic
 }
@@ -1107,53 +1115,50 @@ func (a *Account) GetOpenAIBaseURL() string {
 		if baseURL != "" {
 			return baseURL
 		}
-		if a.IsOpenCodeGo() {
-			return openCodeGoDefaultChatCompletionsURL
-		}
 	}
 	return "https://api.openai.com"
 }
 
-// IsOpenCodeGo reports whether an OpenAI API-key account should use the
-// OpenCode Go compatibility path for Claude Code /v1/messages traffic.
-func (a *Account) IsOpenCodeGo() bool {
-	if a == nil || !a.IsOpenAIApiKey() || a.Extra == nil {
-		return false
+func (a *Account) IsOpenCodeGoAPIKey() bool {
+	return a.IsOpenCodeGo() && a.Type == AccountTypeAPIKey
+}
+
+func (a *Account) GetOpenCodeGoAPIKey() string {
+	if !a.IsOpenCodeGoAPIKey() {
+		return ""
 	}
-	if enabled, ok := a.Extra[openCodeGoExtraKeyEnabled].(bool); ok {
-		return enabled
+	return a.GetCredential("api_key")
+}
+
+func (a *Account) GetOpenCodeGoBaseURL() string {
+	if !a.IsOpenCodeGoAPIKey() {
+		return ""
 	}
-	if enabled, ok := a.Extra["opencode_go_enabled"].(bool); ok {
-		return enabled
+	if baseURL := strings.TrimSpace(a.GetCredential("base_url")); baseURL != "" {
+		return baseURL
 	}
-	if provider, ok := a.Extra["openai_provider"].(string); ok && strings.EqualFold(strings.TrimSpace(provider), "opencode-go") {
-		return true
-	}
-	if provider, ok := a.Extra["provider"].(string); ok && strings.EqualFold(strings.TrimSpace(provider), "opencode-go") {
-		return true
-	}
-	return false
+	return openCodeGoDefaultChatCompletionsURL
 }
 
 // GetOpenCodeGoAnthropicBaseURL returns the Anthropic Messages endpoint for an
-// OpenCode Go account. It can be explicitly configured in extra, or derived
-// from the Chat Completions base_url used by existing OpenAI-compatible code.
+// OpenCode Go account. It can be explicitly configured in credentials, or
+// derived from the Chat Completions base_url.
 func (a *Account) GetOpenCodeGoAnthropicBaseURL() string {
-	if a == nil || !a.IsOpenCodeGo() {
+	if a == nil || !a.IsOpenCodeGoAPIKey() {
 		return ""
 	}
-	if raw := strings.TrimSpace(a.GetExtraString(openCodeGoExtraKeyAnthropicBaseURL)); raw != "" {
+	if raw := strings.TrimSpace(a.GetCredential(openCodeGoCredentialKeyAnthropicBaseURL)); raw != "" {
 		return raw
 	}
-	return buildOpenCodeGoAnthropicMessagesURL(a.GetOpenAIBaseURL())
+	return buildOpenCodeGoAnthropicMessagesURL(a.GetOpenCodeGoBaseURL())
 }
 
 // IsOpenCodeGoAnthropicNativeModel reports whether the mapped OpenCode Go model
 // should use the provider's Anthropic Messages endpoint instead of Chat
 // Completions. The default list mirrors routatic/proxy and can be extended via
-// extra.opencode_go_anthropic_models.
+// credentials.anthropic_models.
 func (a *Account) IsOpenCodeGoAnthropicNativeModel(model string) bool {
-	if a == nil || !a.IsOpenCodeGo() {
+	if a == nil || !a.IsOpenCodeGoAPIKey() {
 		return false
 	}
 	normalized := strings.ToLower(strings.TrimSpace(model))
@@ -1165,7 +1170,7 @@ func (a *Account) IsOpenCodeGoAnthropicNativeModel(model string) bool {
 		"qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max":
 		return true
 	}
-	for _, candidate := range stringSliceFromRaw(a.Extra[openCodeGoExtraKeyAnthropicModels]) {
+	for _, candidate := range stringSliceFromRaw(a.Credentials[openCodeGoCredentialKeyAnthropicModels]) {
 		if strings.EqualFold(strings.TrimSpace(candidate), normalized) {
 			return true
 		}

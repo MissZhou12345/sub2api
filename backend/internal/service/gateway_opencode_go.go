@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -63,72 +62,67 @@ func stringSliceFromRaw(raw any) []string {
 	}
 }
 
-func (s *OpenAIGatewayService) forwardOpenCodeGoAsAnthropic(
+func (s *GatewayService) forwardOpenCodeGoMessages(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
-	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
-	startTime := time.Now()
-
+	parsed *ParsedRequest,
+	startTime time.Time,
+) (*ForwardResult, error) {
 	var anthropicReq apicompat.AnthropicRequest
-	if err := json.Unmarshal(body, &anthropicReq); err != nil {
-		return nil, fmt.Errorf("parse anthropic request: %w", err)
+	if err := json.Unmarshal(parsed.Body.Bytes(), &anthropicReq); err != nil {
+		return nil, fmt.Errorf("parse opencode_go anthropic request: %w", err)
 	}
 	originalModel := anthropicReq.Model
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	if upstreamModel == "" {
-		upstreamModel = billingModel
+	upstreamModel := account.GetMappedModel(originalModel)
+	if strings.TrimSpace(upstreamModel) == "" {
+		upstreamModel = originalModel
 	}
 	anthropicReq.Model = upstreamModel
 
 	logger.L().Debug("opencode_go messages: model mapping applied",
 		zap.Int64("account_id", account.ID),
 		zap.String("original_model", originalModel),
-		zap.String("billing_model", billingModel),
 		zap.String("upstream_model", upstreamModel),
 		zap.Bool("stream", anthropicReq.Stream),
 		zap.Bool("anthropic_native", account.IsOpenCodeGoAnthropicNativeModel(upstreamModel)),
 	)
 
 	if account.IsOpenCodeGoAnthropicNativeModel(upstreamModel) {
-		return s.forwardOpenCodeGoAnthropicNative(ctx, c, account, &anthropicReq, originalModel, billingModel, upstreamModel, startTime)
+		return s.forwardOpenCodeGoAnthropicNative(ctx, c, account, &anthropicReq, originalModel, upstreamModel, startTime)
 	}
-	return s.forwardOpenCodeGoChatCompletions(ctx, c, account, &anthropicReq, originalModel, billingModel, upstreamModel, startTime)
+	return s.forwardOpenCodeGoChatCompletions(ctx, c, account, &anthropicReq, originalModel, upstreamModel, startTime)
 }
 
-func (s *OpenAIGatewayService) forwardOpenCodeGoAnthropicNative(
+func (s *GatewayService) forwardOpenCodeGoAnthropicNative(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
 	anthropicReq *apicompat.AnthropicRequest,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	upstreamBody, err := json.Marshal(anthropicReq)
 	if err != nil {
-		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+		return nil, fmt.Errorf("marshal opencode_go anthropic request: %w", err)
 	}
 
-	apiKey := account.GetOpenAIApiKey()
+	apiKey := account.GetOpenCodeGoAPIKey()
 	if apiKey == "" {
 		return nil, fmt.Errorf("account %d missing api_key", account.ID)
 	}
 	baseURL := account.GetOpenCodeGoAnthropicBaseURL()
 	validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid opencode_go_anthropic_base_url: %w", err)
+		return nil, fmt.Errorf("invalid opencode_go anthropic_base_url: %w", err)
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, buildOpenCodeGoAnthropicMessagesURL(validatedURL), bytes.NewReader(upstreamBody))
 	releaseUpstreamCtx()
 	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
+		return nil, fmt.Errorf("build opencode_go upstream request: %w", err)
 	}
 	upstreamReq = upstreamReq.WithContext(WithHTTPUpstreamProfile(upstreamReq.Context(), HTTPUpstreamProfileOpenAI))
 	upstreamReq.Header.Set("Content-Type", "application/json")
@@ -140,67 +134,58 @@ func (s *OpenAIGatewayService) forwardOpenCodeGoAnthropicNative(
 		upstreamReq.Header.Set("Accept", "application/json")
 	}
 
-	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenCodeGoRequest(ctx, c, account, upstreamReq)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		return s.handleOpenCodeGoAnthropicHTTPError(ctx, c, account, resp, upstreamModel)
+		return s.handleOpenCodeGoHTTPError(c, account, resp)
 	}
-
 	if anthropicReq.Stream {
-		return s.streamOpenCodeGoAnthropicNative(c, resp, originalModel, billingModel, upstreamModel, startTime)
+		return s.streamOpenCodeGoAnthropicNative(c, resp, originalModel, upstreamModel, startTime)
 	}
-	return s.bufferOpenCodeGoAnthropicNative(c, resp, originalModel, billingModel, upstreamModel, startTime)
+	return s.bufferOpenCodeGoAnthropicNative(c, resp, originalModel, upstreamModel, startTime)
 }
 
-func (s *OpenAIGatewayService) forwardOpenCodeGoChatCompletions(
+func (s *GatewayService) forwardOpenCodeGoChatCompletions(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
 	anthropicReq *apicompat.AnthropicRequest,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	responsesReq, err := apicompat.AnthropicToResponses(anthropicReq)
 	if err != nil {
-		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
+		return nil, fmt.Errorf("convert opencode_go anthropic to responses: %w", err)
 	}
 	responsesReq.Model = upstreamModel
 	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(responsesReq)
 	if err != nil {
-		return nil, fmt.Errorf("convert responses to chat completions: %w", err)
+		return nil, fmt.Errorf("convert opencode_go responses to chat completions: %w", err)
 	}
 	chatReq.Model = upstreamModel
 	chatReq.Stream = anthropicReq.Stream
 
 	upstreamBody, err := json.Marshal(chatReq)
 	if err != nil {
-		return nil, fmt.Errorf("marshal chat completions request: %w", err)
+		return nil, fmt.Errorf("marshal opencode_go chat request: %w", err)
 	}
 	if chatReq.Stream {
 		upstreamBody, err = ensureOpenAIChatStreamUsage(upstreamBody)
 		if err != nil {
-			return nil, fmt.Errorf("enable stream usage: %w", err)
+			return nil, fmt.Errorf("enable opencode_go stream usage: %w", err)
 		}
 	}
 
-	apiKey := account.GetOpenAIApiKey()
+	apiKey := account.GetOpenCodeGoAPIKey()
 	if apiKey == "" {
 		return nil, fmt.Errorf("account %d missing api_key", account.ID)
 	}
-	baseURL := account.GetOpenAIBaseURL()
+	baseURL := account.GetOpenCodeGoBaseURL()
 	if baseURL == "" {
 		baseURL = openCodeGoDefaultChatCompletionsURL
 	}
@@ -214,7 +199,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeGoChatCompletions(
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
 	releaseUpstreamCtx()
 	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
+		return nil, fmt.Errorf("build opencode_go upstream request: %w", err)
 	}
 	upstreamReq = upstreamReq.WithContext(WithHTTPUpstreamProfile(upstreamReq.Context(), HTTPUpstreamProfileOpenAI))
 	upstreamReq.Header.Set("Content-Type", "application/json")
@@ -224,91 +209,83 @@ func (s *OpenAIGatewayService) forwardOpenCodeGoChatCompletions(
 	} else {
 		upstreamReq.Header.Set("Accept", "application/json")
 	}
-	if customUA := account.GetOpenAIUserAgent(); customUA != "" {
-		upstreamReq.Header.Set("user-agent", customUA)
-	}
 
-	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenCodeGoRequest(ctx, c, account, upstreamReq)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		return s.handleOpenCodeGoAnthropicHTTPError(ctx, c, account, resp, upstreamModel)
+		return s.handleOpenCodeGoHTTPError(c, account, resp)
 	}
-
 	if chatReq.Stream {
-		return s.streamOpenCodeGoChatAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, startTime)
+		return s.streamOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
 	}
-	return s.bufferOpenCodeGoChatAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, startTime)
+	return s.bufferOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
 }
 
-func (s *OpenAIGatewayService) handleOpenCodeGoAnthropicHTTPError(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	resp *http.Response,
-	upstreamModel string,
-) (*OpenAIForwardResult, error) {
-	respBody := s.readUpstreamErrorBody(resp)
-	_ = resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(respBody))
+func (s *GatewayService) doOpenCodeGoRequest(ctx context.Context, c *gin.Context, account *Account, req *http.Request) (*http.Response, error) {
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		setOpsUpstreamError(c, 0, safeErr, "")
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
+		return nil, fmt.Errorf("opencode_go upstream request failed: %s", safeErr)
+	}
+	if resp == nil || resp.Body == nil {
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
+		return nil, errors.New("opencode_go upstream returned empty response")
+	}
+	return resp, nil
+}
 
-	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+func (s *GatewayService) handleOpenCodeGoHTTPError(c *gin.Context, account *Account, resp *http.Response) (*ForwardResult, error) {
+	respBody, _ := s.readUpstreamErrorBody(resp)
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 	if upstreamMsg == "" {
 		upstreamMsg = http.StatusText(resp.StatusCode)
 	}
-	if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
-			Kind:               "failover",
-			Message:            upstreamMsg,
-		})
-		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
-		}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Kind:               "failover",
+		Message:            upstreamMsg,
+	})
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 	}
 	writeAnthropicError(c, mapUpstreamStatusCode(resp.StatusCode), "api_error", upstreamMsg)
-	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+	return nil, fmt.Errorf("opencode_go upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }
 
-func (s *OpenAIGatewayService) bufferOpenCodeGoChatAsAnthropic(
+func (s *GatewayService) bufferOpenCodeGoChatAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
 			writeAnthropicError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
 		}
-		return nil, fmt.Errorf("read upstream body: %w", err)
+		return nil, fmt.Errorf("read opencode_go upstream body: %w", err)
 	}
 
 	var chatResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
-		return nil, fmt.Errorf("parse chat completions response: %w", err)
+		return nil, fmt.Errorf("parse opencode_go chat response: %w", err)
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(&chatResp, upstreamModel)
 	anthropicResp := apicompat.ResponsesToAnthropic(responsesResp, originalModel)
@@ -318,35 +295,23 @@ func (s *OpenAIGatewayService) bufferOpenCodeGoChatAsAnthropic(
 	}
 	c.JSON(http.StatusOK, anthropicResp)
 
-	usage := OpenAIUsage{}
-	if chatResp.Usage != nil {
-		usage = OpenAIUsage{
-			InputTokens:  chatResp.Usage.PromptTokens,
-			OutputTokens: chatResp.Usage.CompletionTokens,
-		}
-		if chatResp.Usage.PromptTokensDetails != nil {
-			usage.CacheReadInputTokens = chatResp.Usage.PromptTokensDetails.CachedTokens
-		}
-	}
-	return &OpenAIForwardResult{
+	return &ForwardResult{
 		RequestID:     requestID,
-		Usage:         usage,
+		Usage:         claudeUsageFromOpenAIChatUsage(chatResp.Usage),
 		Model:         originalModel,
-		BillingModel:  billingModel,
 		UpstreamModel: upstreamModel,
 		Stream:        false,
 		Duration:      time.Since(startTime),
 	}, nil
 }
 
-func (s *OpenAIGatewayService) streamOpenCodeGoChatAsAnthropic(
+func (s *GatewayService) streamOpenCodeGoChatAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -367,16 +332,16 @@ func (s *OpenAIGatewayService) streamOpenCodeGoChatAsAnthropic(
 	chatState := apicompat.NewChatCompletionsToResponsesStreamState(upstreamModel)
 	anthropicState := apicompat.NewResponsesEventToAnthropicState()
 	anthropicState.Model = originalModel
-	var usage OpenAIUsage
+	var usage ClaudeUsage
 	var firstTokenMs *int
 
 	writeAnthropicEvents := func(events []apicompat.ResponsesStreamEvent) error {
 		for _, resEvt := range events {
 			if resEvt.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(resEvt.Usage)
+				usage = claudeUsageFromOpenAIUsage(copyOpenAIUsageFromResponsesUsage(resEvt.Usage))
 			}
 			if resEvt.Response != nil && resEvt.Response.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(resEvt.Response.Usage)
+				usage = claudeUsageFromOpenAIUsage(copyOpenAIUsageFromResponsesUsage(resEvt.Response.Usage))
 			}
 			anthEvents := apicompat.ResponsesEventToAnthropicEvents(&resEvt, anthropicState)
 			for _, anthEvt := range anthEvents {
@@ -417,29 +382,14 @@ func (s *OpenAIGatewayService) streamOpenCodeGoChatAsAnthropic(
 			firstTokenMs = &elapsed
 		}
 		if chunk.Usage != nil {
-			usage = OpenAIUsage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
-			}
-			if chunk.Usage.PromptTokensDetails != nil {
-				usage.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
-			}
+			usage = claudeUsageFromOpenAIChatUsage(chunk.Usage)
 		}
 		if err := writeAnthropicEvents(apicompat.ChatCompletionsChunkToResponsesEvents(&chunk, chatState)); err != nil {
-			return &OpenAIForwardResult{
-				RequestID:     requestID,
-				Usage:         usage,
-				Model:         originalModel,
-				BillingModel:  billingModel,
-				UpstreamModel: upstreamModel,
-				Stream:        true,
-				Duration:      time.Since(startTime),
-				FirstTokenMs:  firstTokenMs,
-			}, nil
+			break
 		}
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		return nil, fmt.Errorf("read chat stream: %w", err)
+		return nil, fmt.Errorf("read opencode_go chat stream: %w", err)
 	}
 	if err := writeAnthropicEvents(apicompat.FinalizeChatCompletionsResponsesStream(chatState)); err != nil {
 		return nil, err
@@ -455,11 +405,10 @@ func (s *OpenAIGatewayService) streamOpenCodeGoChatAsAnthropic(
 	}
 	c.Writer.Flush()
 
-	return &OpenAIForwardResult{
+	return &ForwardResult{
 		RequestID:     requestID,
 		Usage:         usage,
 		Model:         originalModel,
-		BillingModel:  billingModel,
 		UpstreamModel: upstreamModel,
 		Stream:        true,
 		Duration:      time.Since(startTime),
@@ -467,21 +416,20 @@ func (s *OpenAIGatewayService) streamOpenCodeGoChatAsAnthropic(
 	}, nil
 }
 
-func (s *OpenAIGatewayService) bufferOpenCodeGoAnthropicNative(
+func (s *GatewayService) bufferOpenCodeGoAnthropicNative(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
 			writeAnthropicError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
 		}
-		return nil, fmt.Errorf("read upstream body: %w", err)
+		return nil, fmt.Errorf("read opencode_go anthropic body: %w", err)
 	}
 	var anthropicResp apicompat.AnthropicResponse
 	if err := json.Unmarshal(respBody, &anthropicResp); err == nil {
@@ -493,26 +441,23 @@ func (s *OpenAIGatewayService) bufferOpenCodeGoAnthropicNative(
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", respBody)
 
-	usage := openAIUsageFromAnthropicUsage(anthropicResp.Usage)
-	return &OpenAIForwardResult{
+	return &ForwardResult{
 		RequestID:     requestID,
-		Usage:         usage,
+		Usage:         claudeUsageFromAnthropicUsage(anthropicResp.Usage),
 		Model:         originalModel,
-		BillingModel:  billingModel,
 		UpstreamModel: upstreamModel,
 		Stream:        false,
 		Duration:      time.Since(startTime),
 	}, nil
 }
 
-func (s *OpenAIGatewayService) streamOpenCodeGoAnthropicNative(
+func (s *GatewayService) streamOpenCodeGoAnthropicNative(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
-	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -531,7 +476,7 @@ func (s *OpenAIGatewayService) streamOpenCodeGoAnthropicNative(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	var eventName string
-	var usage OpenAIUsage
+	var usage ClaudeUsage
 	var firstTokenMs *int
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -548,10 +493,10 @@ func (s *OpenAIGatewayService) streamOpenCodeGoAnthropicNative(
 			if err := json.Unmarshal([]byte(payload), &event); err == nil {
 				if event.Type == "message_start" && event.Message != nil {
 					event.Message.Model = originalModel
-					usage = openAIUsageFromAnthropicUsage(event.Message.Usage)
+					usage = claudeUsageFromAnthropicUsage(event.Message.Usage)
 				}
 				if event.Type == "message_delta" && event.Usage != nil {
-					usage = openAIUsageFromAnthropicUsage(*event.Usage)
+					usage = claudeUsageFromAnthropicUsage(*event.Usage)
 				}
 				if firstTokenMs == nil && event.Type == "content_block_delta" {
 					elapsed := int(time.Since(startTime).Milliseconds())
@@ -576,16 +521,15 @@ func (s *OpenAIGatewayService) streamOpenCodeGoAnthropicNative(
 		}
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		return nil, fmt.Errorf("read anthropic stream: %w", err)
+		return nil, fmt.Errorf("read opencode_go anthropic stream: %w", err)
 	}
 	if eventName != "" {
 		c.Writer.Flush()
 	}
-	return &OpenAIForwardResult{
+	return &ForwardResult{
 		RequestID:     requestID,
 		Usage:         usage,
 		Model:         originalModel,
-		BillingModel:  billingModel,
 		UpstreamModel: upstreamModel,
 		Stream:        true,
 		Duration:      time.Since(startTime),
@@ -593,8 +537,31 @@ func (s *OpenAIGatewayService) streamOpenCodeGoAnthropicNative(
 	}, nil
 }
 
-func openAIUsageFromAnthropicUsage(usage apicompat.AnthropicUsage) OpenAIUsage {
-	return OpenAIUsage{
+func claudeUsageFromAnthropicUsage(usage apicompat.AnthropicUsage) ClaudeUsage {
+	return ClaudeUsage{
+		InputTokens:              usage.InputTokens,
+		OutputTokens:             usage.OutputTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     usage.CacheReadInputTokens,
+	}
+}
+
+func claudeUsageFromOpenAIChatUsage(usage *apicompat.ChatUsage) ClaudeUsage {
+	if usage == nil {
+		return ClaudeUsage{}
+	}
+	out := ClaudeUsage{
+		InputTokens:  usage.PromptTokens,
+		OutputTokens: usage.CompletionTokens,
+	}
+	if usage.PromptTokensDetails != nil {
+		out.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	return out
+}
+
+func claudeUsageFromOpenAIUsage(usage OpenAIUsage) ClaudeUsage {
+	return ClaudeUsage{
 		InputTokens:              usage.InputTokens,
 		OutputTokens:             usage.OutputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,

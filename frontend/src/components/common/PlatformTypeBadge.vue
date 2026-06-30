@@ -86,6 +86,7 @@ const platformLabel = computed(() => {
   if (props.platform === 'openai') return 'OpenAI'
   if (props.platform === 'antigravity') return 'Antigravity'
   if (props.platform === 'kiro') return 'Kiro'
+  if (props.platform === 'opencode_go') return 'OpenCode Go'
   return 'Gemini'
 })
 
@@ -139,6 +140,9 @@ const platformClass = computed(() => {
   if (props.platform === 'kiro') {
     return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
   }
+  if (props.platform === 'opencode_go') {
+    return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300'
+  }
   return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
 })
 
@@ -154,6 +158,9 @@ const typeClass = computed(() => {
   }
   if (props.platform === 'kiro') {
     return 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400'
+  }
+  if (props.platform === 'opencode_go') {
+    return 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-300'
   }
   return 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
 })

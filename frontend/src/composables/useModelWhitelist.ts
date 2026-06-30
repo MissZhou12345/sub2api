@@ -107,6 +107,28 @@ const kiroModels = [
   'claude-haiku-4-5-20251001-thinking'
 ]
 
+const opencodeGoModels = [
+  'claude-opus-4-8',
+  'claude-opus-4-8-thinking',
+  'claude-opus-4-7',
+  'claude-opus-4-7-thinking',
+  'claude-opus-4-6',
+  'claude-opus-4-6-thinking',
+  'claude-sonnet-4-6',
+  'claude-sonnet-4-6-thinking',
+  'claude-opus-4-5-20251101',
+  'claude-opus-4-5-20251101-thinking',
+  'claude-sonnet-4-5-20250929',
+  'claude-sonnet-4-5-20250929-thinking',
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5-20251001-thinking',
+  'claude-3-5-sonnet-latest',
+  'claude-3-7-sonnet-latest',
+  'claude-sonnet-4-20250514',
+  'claude-opus-4-20250514',
+  'glm-5.2'
+]
+
 // 智谱 GLM
 const zhipuModels = [
   'glm-4', 'glm-4v', 'glm-4-plus', 'glm-4-0520',
@@ -237,6 +259,7 @@ const allModelsList: string[] = [
   ...openaiModels,
   ...claudeModels,
   ...geminiModels,
+  ...opencodeGoModels,
   ...zhipuModels,
   ...qwenModels,
   ...deepseekModels,
@@ -351,6 +374,16 @@ const kiroPresetMappings = [
   { label: 'Haiku 4.5 Thinking', from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5', color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300' }
 ]
 
+const opencodeGoPresetMappings = [
+  { label: 'Claude→GLM 5.2', from: 'claude-*', to: 'glm-5.2', color: 'bg-teal-100 text-teal-700 hover:bg-teal-200 dark:bg-teal-900/30 dark:text-teal-300' },
+  { label: 'Sonnet 4.6', from: 'claude-sonnet-4-6', to: 'glm-5.2', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-300' },
+  { label: 'Opus 4.8', from: 'claude-opus-4-8', to: 'glm-5.2', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300' },
+  { label: 'Opus 4.7', from: 'claude-opus-4-7', to: 'glm-5.2', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300' },
+  { label: 'Opus 4.6', from: 'claude-opus-4-6', to: 'glm-5.2', color: 'bg-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-200 dark:bg-fuchsia-900/30 dark:text-fuchsia-300' },
+  { label: 'Sonnet 4.5', from: 'claude-sonnet-4-5-20250929', to: 'glm-5.2', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-300' },
+  { label: 'Haiku 4.5', from: 'claude-haiku-4-5-20251001', to: 'glm-5.2', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300' }
+]
+
 // Bedrock 预设映射（与后端 DefaultBedrockModelMapping 保持一致）
 const bedrockPresetMappings = [
   { label: 'Fable 5', from: 'claude-fable-5', to: 'anthropic.claude-fable-5', color: 'bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400' },
@@ -364,6 +397,20 @@ const bedrockPresetMappings = [
 ]
 
 const kiroDefaultMappings = kiroPresetMappings.map(({ from, to }) => ({ from, to }))
+const opencodeGoDefaultMappings = [
+  { from: 'claude-opus-4-8', to: 'glm-5.2' },
+  { from: 'claude-opus-4-7', to: 'glm-5.2' },
+  { from: 'claude-opus-4-6', to: 'glm-5.2' },
+  { from: 'claude-sonnet-4-6', to: 'glm-5.2' },
+  { from: 'claude-opus-4-5-20251101', to: 'glm-5.2' },
+  { from: 'claude-sonnet-4-5-20250929', to: 'glm-5.2' },
+  { from: 'claude-haiku-4-5', to: 'glm-5.2' },
+  { from: 'claude-haiku-4-5-20251001', to: 'glm-5.2' },
+  { from: 'claude-3-5-sonnet-latest', to: 'glm-5.2' },
+  { from: 'claude-3-7-sonnet-latest', to: 'glm-5.2' },
+  { from: 'claude-sonnet-4-20250514', to: 'glm-5.2' },
+  { from: 'claude-opus-4-20250514', to: 'glm-5.2' }
+]
 
 // Antigravity 默认映射（从后端 API 获取，与 constants.go 保持一致）
 // 使用 fetchAntigravityDefaultMappings() 异步获取
@@ -371,6 +418,7 @@ import { getAntigravityDefaultModelMapping } from '@/api/admin/accounts'
 
 let _antigravityDefaultMappingsCache: { from: string; to: string }[] | null = null
 let _kiroDefaultMappingsCache: { from: string; to: string }[] | null = null
+let _opencodeGoDefaultMappingsCache: { from: string; to: string }[] | null = null
 
 export async function fetchAntigravityDefaultMappings(): Promise<{ from: string; to: string }[]> {
   if (_antigravityDefaultMappingsCache !== null) {
@@ -392,6 +440,14 @@ export async function fetchKiroDefaultMappings(): Promise<{ from: string; to: st
   }
   _kiroDefaultMappingsCache = kiroDefaultMappings.map(({ from, to }) => ({ from, to }))
   return _kiroDefaultMappingsCache.map(({ from, to }) => ({ from, to }))
+}
+
+export async function fetchOpenCodeGoDefaultMappings(): Promise<{ from: string; to: string }[]> {
+  if (_opencodeGoDefaultMappingsCache !== null) {
+    return _opencodeGoDefaultMappingsCache.map(({ from, to }) => ({ from, to }))
+  }
+  _opencodeGoDefaultMappingsCache = opencodeGoDefaultMappings.map(({ from, to }) => ({ from, to }))
+  return _opencodeGoDefaultMappingsCache.map(({ from, to }) => ({ from, to }))
 }
 
 // =====================
@@ -421,6 +477,7 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'gemini': return geminiModels
     case 'antigravity': return antigravityModels
     case 'kiro': return kiroModels
+    case 'opencode_go': return opencodeGoModels
     case 'zhipu': return zhipuModels
     case 'qwen': return qwenModels
     case 'deepseek': return deepseekModels
@@ -446,6 +503,7 @@ export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'gemini') return geminiPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'kiro') return kiroPresetMappings
+  if (platform === 'opencode_go') return opencodeGoPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings
 }

@@ -797,6 +797,11 @@ export default {
         modelComment: '如果你有 Gemini 3 权限可以填：gemini-3-pro-preview',
         note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },
+      opencodeGo: {
+        description:
+          '将以下环境变量添加到 Claude Code CLI。请求仍走 Anthropic Messages 接口，分组内的 OpenCode Go 账号会把 Claude 模型映射到 glm-5.2。',
+        note: '请确保此密钥绑定的是 OpenCode Go 分组；不要绑定 OpenAI 分组，也不需要 extra.opencode_go。'
+      },
       opencode: {
         title: 'OpenCode 配置示例',
         subtitle: 'opencode.json',
@@ -2244,6 +2249,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         kiro: 'Kiro',
+        opencode_go: 'OpenCode Go',
       },
       saving: '保存中...',
       noGroups: '暂无分组',
@@ -3328,6 +3334,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         kiro: 'Kiro',
+        opencode_go: 'OpenCode Go',
       },
       types: {
         oauth: 'OAuth',
@@ -3337,6 +3344,7 @@ export default {
         codeAssist: 'Code Assist',
         kiroOauth: '社交 OAuth / AWS Builder ID / 导入',
         kiroApikey: '通过 Base URL + API Key 连接',
+        opencodeGoApikey: '通过 OpenCode Go 套餐 API Key 连接',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: '通过 Base URL + API Key 连接',
         upstream: '对接上游',
@@ -3682,6 +3690,10 @@ export default {
       kiro: {
         baseUrlHint: '请输入 Kiro 兼容上游的 Base URL',
         apiKeyHint: '用于该 Kiro 上游的 API Key',
+      },
+      opencodeGo: {
+        baseUrlHint: 'OpenCode Go 官方地址默认为 https://opencode.ai/zen/go/v1',
+        apiKeyHint: '填写 OpenCode Go 套餐的 API Key',
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

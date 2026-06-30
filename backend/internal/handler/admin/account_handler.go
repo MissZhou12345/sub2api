@@ -925,6 +925,8 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 				newCredentials[k] = v
 			}
 		}
+	} else if account.Platform == service.PlatformOpenCodeGo {
+		return nil, "", fmt.Errorf("opencode_go API key accounts do not support credential refresh")
 	} else {
 		// Use Anthropic/Claude OAuth service to refresh token
 		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
@@ -2097,6 +2099,12 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		}
 
 		response.Success(c, buildMappedKiroModels(mapping))
+		return
+	}
+
+	// Handle OpenCode Go accounts
+	if account.Platform == service.PlatformOpenCodeGo {
+		response.Success(c, buildMappedKiroModels(account.GetModelMapping()))
 		return
 	}
 

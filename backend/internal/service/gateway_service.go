@@ -5057,6 +5057,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return s.forwardKiroMessages(ctx, c, account, parsed, startTime)
 	}
 
+	if account != nil && account.IsOpenCodeGoAPIKey() {
+		return s.forwardOpenCodeGoMessages(ctx, c, account, parsed, startTime)
+	}
+
 	// Beta policy: evaluate once; block check + cache filter set for buildUpstreamRequest.
 	// Always overwrite the cache to prevent stale values from a previous retry with a different account.
 	if account.Platform == PlatformAnthropic && c != nil {
@@ -10213,6 +10217,10 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
 		s.countTokensError(c, http.StatusNotFound, "not_found_error", "Token counting is not supported for this platform")
+		return nil
+	}
+	if account.IsOpenCodeGo() {
+		s.countTokensError(c, http.StatusNotFound, "not_found_error", "Token counting is not supported for OpenCode Go")
 		return nil
 	}
 

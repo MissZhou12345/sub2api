@@ -1,8 +1,4 @@
-# accounts Specification
-
-## Purpose
-Defines how OpenCode Go upstream accounts are configured as a first-class platform for Claude Code usage through sub2api.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: OpenCode Go Account Configuration
 An OpenCode Go upstream SHALL be configurable as a first-class API-key account using `platform=opencode_go`, not as an OpenAI account with compatibility metadata.
 

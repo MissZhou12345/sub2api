@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1172,6 +1173,13 @@ func defaultModelIDsForPlatform(platform string) []string {
 		for _, model := range models {
 			ids = append(ids, model.ID)
 		}
+		return ids
+	case service.PlatformOpenCodeGo:
+		ids := make([]string, 0, len(domain.DefaultOpenCodeGoModelMapping))
+		for model := range domain.DefaultOpenCodeGoModelMapping {
+			ids = append(ids, model)
+		}
+		sort.Strings(ids)
 		return ids
 	default:
 		ids := make([]string, 0, len(claude.DefaultModels))

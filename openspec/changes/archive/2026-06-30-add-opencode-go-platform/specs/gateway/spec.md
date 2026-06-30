@@ -1,8 +1,4 @@
-# gateway Specification
-
-## Purpose
-Defines gateway behavior for serving Claude Code Anthropic Messages requests through OpenCode Go accounts, including GLM-5.2 Chat Completions conversion.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: OpenCode Go Claude Code Proxy
 The gateway SHALL allow Claude Code CLI Anthropic Messages requests to be served by an OpenCode Go API-key account selected from an `opencode_go` group.
 

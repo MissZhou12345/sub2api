@@ -70,6 +70,7 @@ func NormalizeInboundEndpoint(path string) string {
 //     such as /v1/responses/compact preserved from the raw URL).
 //   - Anthropic  → /v1/messages
 //   - Gemini     → /v1beta/models
+//   - OpenCode Go → /v1/chat/completions for Claude Messages conversion
 //   - Antigravity → /v1/messages (Claude) or gemini (Gemini)
 //   - Antigravity routes may target either Claude or Gemini, so the
 //     inbound endpoint is used to distinguish.
@@ -93,6 +94,12 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 
 	case service.PlatformGemini:
 		return EndpointGeminiModels
+
+	case service.PlatformOpenCodeGo:
+		if inbound == EndpointMessages {
+			return EndpointChatCompletions
+		}
+		return inbound
 
 	case service.PlatformAntigravity:
 		// Antigravity accounts serve both Claude and Gemini.

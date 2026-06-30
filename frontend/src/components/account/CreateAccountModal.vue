@@ -160,6 +160,19 @@
             <Icon name="sparkles" size="sm" />
             Kiro
           </button>
+          <button
+            type="button"
+            @click="form.platform = 'opencode_go'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'opencode_go'
+                ? 'bg-white text-teal-700 shadow-sm dark:bg-dark-600 dark:text-teal-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <Icon name="terminal" size="sm" />
+            OpenCode Go
+          </button>
         </div>
       </div>
 
@@ -828,6 +841,33 @@
         </div>
       </div>
 
+      <!-- OpenCode Go account type selection -->
+      <div v-if="form.platform === 'opencode_go'">
+        <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            @click="accountCategory = 'apikey'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              accountCategory === 'apikey'
+                ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20'
+                : 'border-gray-200 hover:border-teal-300 dark:border-dark-600 dark:hover:border-teal-700'
+            ]"
+          >
+            <div :class="['flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', accountCategory === 'apikey' ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400']">
+              <Icon name="key" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">API Key</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.types.opencodeGoApikey') }}
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <!-- Kiro OAuth auth mode selection -->
       <div v-if="form.platform === 'kiro' && accountCategory === 'oauth-based'">
         <label class="input-label">{{ t('admin.accounts.oauth.kiro.authModeTitle') }}</label>
@@ -1461,7 +1501,7 @@
         </div>
       </div>
 
-      <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
+      <!-- API Key input (only for apikey type, excluding Antigravity/Kiro which have their own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity' && form.platform !== 'kiro'" class="space-y-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -1474,6 +1514,8 @@
                 ? 'https://api.openai.com'
                 : form.platform === 'gemini'
                   ? 'https://generativelanguage.googleapis.com'
+                  : form.platform === 'opencode_go'
+                    ? 'https://opencode.ai/zen/go/v1'
                   : 'https://api.anthropic.com'
             "
           />
@@ -1491,6 +1533,8 @@
                 ? 'sk-proj-...'
                 : form.platform === 'gemini'
                   ? 'AIza...'
+                  : form.platform === 'opencode_go'
+                    ? 'sk-...'
                   : 'sk-ant-...'
             "
           />
@@ -3693,6 +3737,7 @@ import {
   buildModelMappingObject,
   fetchAntigravityDefaultMappings,
   fetchKiroDefaultMappings,
+  fetchOpenCodeGoDefaultMappings,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
 import { useAuthStore } from '@/stores/auth'
@@ -3777,6 +3822,7 @@ const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (form.platform === 'kiro') return t('admin.accounts.kiro.baseUrlHint')
+  if (form.platform === 'opencode_go') return t('admin.accounts.opencodeGo.baseUrlHint')
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -3784,6 +3830,7 @@ const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
   if (form.platform === 'kiro') return t('admin.accounts.kiro.apiKeyHint')
+  if (form.platform === 'opencode_go') return t('admin.accounts.opencodeGo.apiKeyHint')
   return t('admin.accounts.apiKeyHint')
 })
 
@@ -4310,6 +4357,12 @@ watch(
         fetchKiroDefaultMappings().then(mappings => {
           kiroModelMappings.value = [...mappings]
         })
+      } else if (form.platform === 'opencode_go') {
+        modelRestrictionMode.value = 'mapping'
+        fetchOpenCodeGoDefaultMappings().then(mappings => {
+          modelMappings.value = [...mappings]
+        })
+        allowedModels.value = []
       } else {
         antigravityWhitelistModels.value = []
         antigravityModelMappings.value = []
@@ -4333,6 +4386,10 @@ watch(
     }
     if (form.platform === 'kiro') {
       form.type = category === 'oauth-based' ? 'oauth' : 'apikey'
+      return
+    }
+    if (form.platform === 'opencode_go') {
+      form.type = 'apikey'
       return
     }
     // Bedrock 类型
@@ -4361,6 +4418,8 @@ watch(
         ? 'https://api.openai.com'
         : newPlatform === 'gemini'
           ? 'https://generativelanguage.googleapis.com'
+          : newPlatform === 'opencode_go'
+            ? 'https://opencode.ai/zen/go/v1'
           : newPlatform === 'kiro'
             ? ''
           : 'https://api.anthropic.com'
@@ -4385,6 +4444,17 @@ watch(
       kiroOAuthProvider.value = 'google'
       apiKeyBaseUrl.value = ''
       apiKeyValue.value = ''
+    } else if (newPlatform === 'opencode_go') {
+      accountCategory.value = 'apikey'
+      modelRestrictionMode.value = 'mapping'
+      fetchOpenCodeGoDefaultMappings().then(mappings => {
+        modelMappings.value = [...mappings]
+      })
+      allowedModels.value = []
+      antigravityWhitelistModels.value = []
+      antigravityModelMappings.value = []
+      antigravityModelRestrictionMode.value = 'mapping'
+      kiroModelMappings.value = []
     } else {
       allowOverages.value = false
       antigravityWhitelistModels.value = []
@@ -4393,10 +4463,10 @@ watch(
       kiroModelMappings.value = []
     }
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
-      accountCategory.value = 'oauth-based'
+      accountCategory.value = newPlatform === 'opencode_go' ? 'apikey' : 'oauth-based'
     }
     if (newPlatform !== 'anthropic' && accountCategory.value === 'bedrock') {
-      accountCategory.value = 'oauth-based'
+      accountCategory.value = newPlatform === 'opencode_go' ? 'apikey' : 'oauth-based'
     }
     // Reset Bedrock fields when switching platforms
     bedrockAccessKeyId.value = ''
@@ -5287,6 +5357,8 @@ const handleSubmit = async () => {
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
         ? 'https://generativelanguage.googleapis.com'
+        : form.platform === 'opencode_go'
+          ? 'https://opencode.ai/zen/go/v1'
         : 'https://api.anthropic.com'
 
   // Build credentials with optional model mapping

@@ -192,6 +192,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testGeminiAccountConnection(c, account, modelID, prompt)
 	}
 
+	if account.IsOpenCodeGo() {
+		return s.testOpenCodeGoAccountConnection(c, account, modelID, prompt)
+	}
+
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
 	}
@@ -201,6 +205,26 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
+}
+
+func (s *AccountTestService) testOpenCodeGoAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
+	if account.Type != AccountTypeAPIKey {
+		return s.sendErrorAndEnd(c, "OpenCode Go only supports API Key accounts")
+	}
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		testModelID = "claude-sonnet-4-6"
+	}
+	testModelID = account.GetMappedModel(testModelID)
+	authToken := account.GetOpenCodeGoAPIKey()
+	if authToken == "" {
+		return s.sendErrorAndEnd(c, "No API key available")
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(account.GetOpenCodeGoBaseURL())
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+	}
+	return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken)
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection

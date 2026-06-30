@@ -9,13 +9,14 @@ import {
   type DefaultPlatformQuotasMap,
 } from "@/api/admin/settings";
 
-/** 全 null 的 4 平台 map，用于断言归一化默认值 */
+/** 全 null 的平台 map，用于断言归一化默认值 */
 const allNullQuotas: DefaultPlatformQuotasMap = {
   anthropic: { daily: null, weekly: null, monthly: null },
   openai:    { daily: null, weekly: null, monthly: null },
   gemini:    { daily: null, weekly: null, monthly: null },
   antigravity: { daily: null, weekly: null, monthly: null },
   kiro: { daily: null, weekly: null, monthly: null },
+  opencode_go: { daily: null, weekly: null, monthly: null },
 }
 
 describe("admin settings auth source defaults helpers", () => {
@@ -96,6 +97,7 @@ describe("admin settings auth source defaults helpers", () => {
     expect(state.email.platform_quotas.gemini).toEqual({ daily: null, weekly: null, monthly: null });
     expect(state.email.platform_quotas.antigravity).toEqual({ daily: null, weekly: null, monthly: null });
     expect(state.email.platform_quotas.kiro).toEqual({ daily: null, weekly: null, monthly: null });
+    expect(state.email.platform_quotas.opencode_go).toEqual({ daily: null, weekly: null, monthly: null });
   });
 
   it("appends auth source defaults back onto update payload", () => {
@@ -229,6 +231,7 @@ describe("admin settings auth source defaults helpers", () => {
     expect(emailQuotas.gemini).toEqual({ daily: null, weekly: null, monthly: null });
     expect(emailQuotas.antigravity).toEqual({ daily: null, weekly: null, monthly: null });
     expect(emailQuotas.kiro).toEqual({ daily: null, weekly: null, monthly: null });
+    expect(emailQuotas.opencode_go).toEqual({ daily: null, weekly: null, monthly: null });
   });
 });
 
@@ -240,11 +243,12 @@ describe("normalizePlatformQuotasMap", () => {
     expect(result.gemini).toEqual({ daily: null, weekly: null, monthly: null });
     expect(result.antigravity).toEqual({ daily: null, weekly: null, monthly: null });
     expect(result.kiro).toEqual({ daily: null, weekly: null, monthly: null });
+    expect(result.opencode_go).toEqual({ daily: null, weekly: null, monthly: null });
   });
 
-  it("无参数时返回全 4 平台全 null", () => {
+  it("无参数时返回全平台全 null", () => {
     const result = normalizePlatformQuotasMap();
-    expect(Object.keys(result)).toHaveLength(5);
+    expect(Object.keys(result)).toHaveLength(6);
     for (const v of Object.values(result)) {
       expect(v).toEqual({ daily: null, weekly: null, monthly: null });
     }
@@ -292,7 +296,7 @@ describe("sanitizePlatformQuotasMap", () => {
 
   it("缺失平台填充为全 null", () => {
     const result = sanitizePlatformQuotasMap({});
-    expect(Object.keys(result)).toHaveLength(5);
+    expect(Object.keys(result)).toHaveLength(6);
     for (const v of Object.values(result)) {
       expect(v).toEqual({ daily: null, weekly: null, monthly: null });
     }

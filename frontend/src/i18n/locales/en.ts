@@ -794,6 +794,10 @@ export default {
         modelComment: 'If you have Gemini 3 access, you can use: gemini-3-pro-preview',
         note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       },
+      opencodeGo: {
+        description: 'Add the following environment variables to Claude Code CLI. Requests still use Anthropic Messages, while the OpenCode Go account in this group maps Claude model names to glm-5.2.',
+        note: 'Make sure this key is assigned to an OpenCode Go group. Do not assign it to an OpenAI group, and do not use extra.opencode_go.',
+      },
       opencode: {
         title: 'OpenCode Example',
         subtitle: 'opencode.json',
@@ -2216,6 +2220,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         kiro: 'Kiro',
+        opencode_go: 'OpenCode Go',
       },
       deleteConfirm:
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",
@@ -3140,6 +3145,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         kiro: 'Kiro',
+        opencode_go: 'OpenCode Go',
       },
       types: {
         oauth: 'OAuth',
@@ -3149,6 +3155,7 @@ export default {
         codeAssist: 'Code Assist',
         kiroOauth: 'Social OAuth / AWS Builder ID / Import',
         kiroApikey: 'Connect via Base URL + API Key',
+        opencodeGoApikey: 'Connect with an OpenCode Go package API Key',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
         upstream: 'Upstream',
@@ -3515,6 +3522,10 @@ export default {
       kiro: {
         baseUrlHint: 'Enter the Base URL of the Kiro-compatible upstream',
         apiKeyHint: 'API Key for that Kiro upstream',
+      },
+      opencodeGo: {
+        baseUrlHint: 'Official OpenCode Go default: https://opencode.ai/zen/go/v1',
+        apiKeyHint: 'API Key from your OpenCode Go package',
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

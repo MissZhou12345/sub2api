@@ -154,7 +154,7 @@ func TestUpdateUserPlatformQuotas_RejectsNegativeLimit(t *testing.T) {
 func TestUpdateUserPlatformQuotas_RejectsTooManyEntries(t *testing.T) {
 	h := buildTestHandler(&upsertCapturingQuotaRepo{}, &billingCacheStub{})
 	body := `{"quotas":[
-		{"platform":"anthropic"},{"platform":"openai"},{"platform":"gemini"},{"platform":"antigravity"},{"platform":"kiro"},{"platform":"anthropic"}
+		{"platform":"anthropic"},{"platform":"openai"},{"platform":"gemini"},{"platform":"antigravity"},{"platform":"kiro"},{"platform":"opencode_go"},{"platform":"anthropic"}
 	]}`
 	c, w := putReq(t, body)
 	h.UpdateUserPlatformQuotas(c)
