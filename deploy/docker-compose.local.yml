@@ -201,6 +201,9 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
+      - TCP_KEEPALIVES_IDLE=60
+      - TCP_KEEPALIVES_INTERVAL=10
+      - TCP_KEEPALIVES_COUNT=3
     networks:
       - sub2api-network
     healthcheck:
