@@ -204,6 +204,10 @@ services:
       - TCP_KEEPALIVES_IDLE=60
       - TCP_KEEPALIVES_INTERVAL=10
       - TCP_KEEPALIVES_COUNT=3
+    # 仅绑定到 127.0.0.1，配合 SSH 隧道使用，不直接暴露到公网
+    # Navicat 通过 SSH 隧道连接：服务器 localhost:5433 → 容器 5432
+    ports:
+      - "5433:5432"
     networks:
       - sub2api-network
     healthcheck:
