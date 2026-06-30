@@ -136,3 +136,4 @@ frontend/coverage/
 aicodex
 output/
 .ace-tool/
+/frontend/package-lock.json
