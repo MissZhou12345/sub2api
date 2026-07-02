@@ -1,8 +1,4 @@
-# accounts Specification
-
-## Purpose
-Defines how OpenCode Go upstream accounts are configured as a first-class platform for Claude Code usage through sub2api.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: OpenCode Go Account Configuration
 An OpenCode Go upstream SHALL be configurable as a first-class API-key account using `platform=opencode_go`, not as an OpenAI account with compatibility metadata.
 
@@ -25,4 +21,3 @@ An OpenCode Go upstream SHALL be configurable as a first-class API-key account u
 #### Scenario: Image-to-text bridge configuration
 - **WHEN** an admin configures an OpenCode Go account with `credentials.image_text_bridge_enabled=true`, `credentials.image_text_bridge_model`, and optional bridge limits
 - **THEN** the gateway MAY use that account's configured vision model to convert image content into text before forwarding to configured text-only target models such as `glm-5.2`
-

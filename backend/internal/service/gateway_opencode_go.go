@@ -158,6 +158,15 @@ func (s *GatewayService) forwardOpenCodeGoChatCompletions(
 	upstreamModel string,
 	startTime time.Time,
 ) (*ForwardResult, error) {
+	bridgeResult, err := s.applyOpenCodeGoImageTextBridge(ctx, c, account, anthropicReq, upstreamModel)
+	if err != nil {
+		return nil, err
+	}
+	if bridgeResult != nil && bridgeResult.Applied {
+		rewritten := bridgeResult.Request
+		anthropicReq = &rewritten
+	}
+
 	responsesReq, err := apicompat.AnthropicToResponses(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert opencode_go anthropic to responses: %w", err)
@@ -219,10 +228,22 @@ func (s *GatewayService) forwardOpenCodeGoChatCompletions(
 	if resp.StatusCode >= 400 {
 		return s.handleOpenCodeGoHTTPError(c, account, resp)
 	}
-	if chatReq.Stream {
-		return s.streamOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
+	var bridgeUsage ClaudeUsage
+	if bridgeResult != nil && bridgeResult.Applied {
+		bridgeUsage = bridgeResult.Usage
 	}
-	return s.bufferOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
+	if chatReq.Stream {
+		result, err := s.streamOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
+		if result != nil {
+			mergeOpenCodeGoUsage(&result.Usage, bridgeUsage)
+		}
+		return result, err
+	}
+	result, err := s.bufferOpenCodeGoChatAsAnthropic(c, resp, originalModel, upstreamModel, startTime)
+	if result != nil {
+		mergeOpenCodeGoUsage(&result.Usage, bridgeUsage)
+	}
+	return result, err
 }
 
 func (s *GatewayService) doOpenCodeGoRequest(ctx context.Context, c *gin.Context, account *Account, req *http.Request) (*http.Response, error) {

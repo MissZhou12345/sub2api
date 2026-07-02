@@ -87,10 +87,16 @@ const (
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 
 const (
-	openCodeGoCredentialKeyAnthropicBaseURL = "anthropic_base_url"
-	openCodeGoCredentialKeyAnthropicModels  = "anthropic_models"
-	openCodeGoDefaultChatCompletionsURL     = "https://opencode.ai/zen/go/v1/chat/completions"
-	openCodeGoDefaultAnthropicMessagesURL   = "https://opencode.ai/zen/go/v1/messages"
+	openCodeGoCredentialKeyAnthropicBaseURL        = "anthropic_base_url"
+	openCodeGoCredentialKeyAnthropicModels         = "anthropic_models"
+	openCodeGoCredentialKeyImageBridgeEnabled      = "image_text_bridge_enabled"
+	openCodeGoCredentialKeyImageBridgeModel        = "image_text_bridge_model"
+	openCodeGoCredentialKeyImageBridgeTargetModels = "image_text_bridge_target_models"
+	openCodeGoCredentialKeyImageBridgeMaxImages    = "image_text_bridge_max_images"
+	openCodeGoDefaultChatCompletionsURL            = "https://opencode.ai/zen/go/v1/chat/completions"
+	openCodeGoDefaultAnthropicMessagesURL          = "https://opencode.ai/zen/go/v1/messages"
+	openCodeGoDefaultImageBridgeModel              = "kimi-k2.7-code"
+	openCodeGoDefaultImageBridgeMaxImages          = 4
 )
 
 type TempUnschedulableRule struct {
@@ -1172,6 +1178,86 @@ func (a *Account) IsOpenCodeGoAnthropicNativeModel(model string) bool {
 	}
 	for _, candidate := range stringSliceFromRaw(a.Credentials[openCodeGoCredentialKeyAnthropicModels]) {
 		if strings.EqualFold(strings.TrimSpace(candidate), normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Account) IsOpenCodeGoImageTextBridgeEnabled() bool {
+	if a == nil || !a.IsOpenCodeGoAPIKey() || a.Credentials == nil {
+		return false
+	}
+	raw, ok := a.Credentials[openCodeGoCredentialKeyImageBridgeEnabled]
+	if !ok || raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on", "enabled":
+			return true
+		default:
+			return false
+		}
+	case json.Number:
+		return v.String() == "1"
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	default:
+		return false
+	}
+}
+
+func (a *Account) GetOpenCodeGoImageTextBridgeModel() string {
+	if a == nil || !a.IsOpenCodeGoAPIKey() {
+		return ""
+	}
+	if raw := strings.TrimSpace(a.GetCredential(openCodeGoCredentialKeyImageBridgeModel)); raw != "" {
+		return raw
+	}
+	return openCodeGoDefaultImageBridgeModel
+}
+
+func (a *Account) GetOpenCodeGoImageTextBridgeMaxImages() int {
+	if a == nil || !a.IsOpenCodeGoAPIKey() {
+		return openCodeGoDefaultImageBridgeMaxImages
+	}
+	raw := a.GetCredential(openCodeGoCredentialKeyImageBridgeMaxImages)
+	if strings.TrimSpace(raw) == "" {
+		return openCodeGoDefaultImageBridgeMaxImages
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return openCodeGoDefaultImageBridgeMaxImages
+	}
+	return n
+}
+
+func (a *Account) IsOpenCodeGoImageTextBridgeTargetModel(model string) bool {
+	if a == nil || !a.IsOpenCodeGoAPIKey() {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	configured := stringSliceFromRaw(a.Credentials[openCodeGoCredentialKeyImageBridgeTargetModels])
+	if len(configured) == 0 {
+		configured = []string{"glm-5.2"}
+	}
+	for _, candidate := range configured {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if candidate == normalized || matchWildcard(candidate, normalized) {
 			return true
 		}
 	}
