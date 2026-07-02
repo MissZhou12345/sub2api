@@ -41,3 +41,6 @@ The gateway SHALL support an optional image-to-text bridge for OpenCode Go reque
 - **WHEN** a Claude Code client sends a text-only `POST /v1/messages` request through an `opencode_go` account
 - **THEN** the gateway uses the existing OpenCode Go forwarding behavior without invoking the image-to-text bridge
 
+#### Scenario: Streaming bridge preflight remains alive
+- **WHEN** a Claude Code client sends a streaming image-containing `POST /v1/messages` request that invokes the OpenCode Go image-to-text bridge
+- **THEN** the gateway sends Anthropic-compatible SSE keepalive comments while the vision preflight is running so upstream vision latency does not leave the client/proxy connection idle

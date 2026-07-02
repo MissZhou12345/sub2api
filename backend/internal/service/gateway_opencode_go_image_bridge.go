@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -61,9 +62,24 @@ func (s *GatewayService) applyOpenCodeGoImageTextBridge(
 		return nil, errors.New("opencode_go image bridge missing model")
 	}
 
+	var stopKeepalive func()
+	if req.Stream {
+		stopKeepalive = startOpenCodeGoImageBridgeStreamKeepalive(c)
+		defer func() {
+			if stopKeepalive != nil {
+				stopKeepalive()
+			}
+		}()
+	}
+
 	description, usage, err := s.callOpenCodeGoImageTextBridge(ctx, c, account, req, images, visionModel)
 	if err != nil {
+		if stopKeepalive != nil {
+			stopKeepalive()
+			stopKeepalive = nil
+		}
 		if c.Writer.Written() {
+			writeOpenCodeGoImageBridgeStreamError(c, "api_error", "OpenCode Go image bridge failed")
 			return nil, err
 		}
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "OpenCode Go image bridge failed")
@@ -72,6 +88,14 @@ func (s *GatewayService) applyOpenCodeGoImageTextBridge(
 
 	transformed, err := replaceOpenCodeGoImagesWithText(req, description)
 	if err != nil {
+		if stopKeepalive != nil {
+			stopKeepalive()
+			stopKeepalive = nil
+		}
+		if c.Writer.Written() {
+			writeOpenCodeGoImageBridgeStreamError(c, "api_error", "Failed to build text-only image bridge request")
+			return nil, err
+		}
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Failed to build text-only image bridge request")
 		return nil, err
 	}
@@ -79,6 +103,46 @@ func (s *GatewayService) applyOpenCodeGoImageTextBridge(
 	result.Usage = usage
 	result.Applied = true
 	return result, nil
+}
+
+func startOpenCodeGoImageBridgeStreamKeepalive(c *gin.Context) func() {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(c.Writer, ": opencode_go_image_bridge_preflight\n\n")
+	c.Writer.Flush()
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := fmt.Fprint(c.Writer, ": opencode_go_image_bridge_preflight\n\n"); err != nil {
+					return
+				}
+				c.Writer.Flush()
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		close(stop)
+		<-done
+	}
+}
+
+func writeOpenCodeGoImageBridgeStreamError(c *gin.Context, errType, message string) {
+	if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, message)); err == nil {
+		c.Writer.Flush()
+	}
 }
 
 func (s *GatewayService) callOpenCodeGoImageTextBridge(

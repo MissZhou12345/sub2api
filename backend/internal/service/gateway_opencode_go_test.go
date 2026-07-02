@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -173,6 +174,92 @@ func TestGatewayServiceForwardOpenCodeGoImageBridge(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "最终回答", gjson.Get(rec.Body.String(), "content.0.text").String())
+}
+
+func TestGatewayServiceForwardOpenCodeGoImageBridgeStreamingKeepsAlive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-6","max_tokens":32,"stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"识别图片并回答"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QUJD"}}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	streamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_glm_stream","object":"chat.completion.chunk","model":"glm-5.2","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_glm_stream","object":"chat.completion.chunk","model":"glm-5.2","choices":[{"index":0,"delta":{"content":"最终"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_glm_stream","object":"chat.completion.chunk","model":"glm-5.2","choices":[{"index":0,"delta":{"content":"回答"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_glm_stream","object":"chat.completion.chunk","model":"glm-5.2","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"id":"chatcmpl_glm_stream","object":"chat.completion.chunk","model":"glm-5.2","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_vision"}},
+			Body: io.NopCloser(bytes.NewReader([]byte(`{
+				"id":"chatcmpl_vision",
+				"object":"chat.completion",
+				"model":"kimi-k2.7-code",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"图片里有 ABC 三个字母。"},"finish_reason":"stop"}],
+				"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}
+			}`))),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_glm_stream"}},
+			Body:       io.NopCloser(strings.NewReader(streamBody)),
+		},
+	}}
+
+	svc := &GatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          104,
+		Name:        "opencode-go",
+		Platform:    PlatformOpenCodeGo,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":                   "oc-test",
+			"base_url":                  "https://opencode.ai/zen/go/v1",
+			"image_text_bridge_enabled": true,
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-6": "glm-5.2",
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.Equal(t, 18, result.Usage.InputTokens)
+	require.Equal(t, 8, result.Usage.OutputTokens)
+	require.Len(t, upstream.bodies, 2)
+
+	require.Equal(t, "kimi-k2.7-code", gjson.GetBytes(upstream.bodies[0], "model").String())
+	require.Equal(t, "glm-5.2", gjson.GetBytes(upstream.bodies[1], "model").String())
+	require.True(t, gjson.GetBytes(upstream.bodies[1], "stream").Bool())
+	require.NotContains(t, string(upstream.bodies[1]), `"image_url"`)
+
+	out := rec.Body.String()
+	require.Contains(t, out, ": opencode_go_image_bridge_preflight")
+	require.Contains(t, out, "event: message_start")
+	require.Contains(t, out, "最终")
+	require.Contains(t, out, "回答")
 }
 
 func TestGatewayServiceForwardOpenCodeGoImageBridgeDisabled(t *testing.T) {
